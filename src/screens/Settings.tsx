@@ -23,7 +23,8 @@ const GENDERS: { value: Gender; label: string }[] = [
   { value: 'unspecified', label: 'Prefer not to say' },
 ];
 
-const REPO_URL = 'https://github.com/SJbuilds04/NOTE';
+const REPO_URL = 'https://github.com/banishwor/esei';
+const WEBSITE_URL = 'https://banishwor.github.io';
 const GPL_URL = 'https://www.gnu.org/licenses/gpl-3.0.en.html';
 const NEWPIPE_URL = 'https://github.com/TeamNewPipe/NewPipeExtractor';
 
@@ -139,7 +140,9 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <Row label="Version" value={`${version}`} />
           <Divider />
-          <Row label="Made by" value="SJBUILDS" />
+          <Row label="Developer" value="Banishwor Athokpam" />
+          <Divider />
+          <LinkRow label="Website" onPress={() => open(WEBSITE_URL)} />
           <Divider />
           <LinkRow label="Source code" onPress={() => open(REPO_URL)} />
         </View>
@@ -167,14 +170,14 @@ export default function SettingsScreen() {
           <Text style={styles.legalBody}>
             Copyright © Team NewPipe and contributors, licensed GPL-3.0-or-later.
             {'\n\n'}
-            NØTE uses it, unmodified, to resolve playable audio. No NewPipe source
-            is included in this app, and linking it is why NØTE carries the same
+            Esei uses it, unmodified, to resolve playable audio. No NewPipe source
+            is included in this app, and linking it is why Esei carries the same
             licence.
           </Text>
           <LinkRow label="NewPipeExtractor on GitHub" onPress={() => open(NEWPIPE_URL)} />
         </View>
 
-        <Text style={styles.footer}>MADE BY SJBUILDS</Text>
+        <Text style={styles.footer}>DEVELOPED BY BANISHWOR ATHOKPAM</Text>
       </ScrollView>
     </View>
   );

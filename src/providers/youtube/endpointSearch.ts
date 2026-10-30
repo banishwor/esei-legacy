@@ -325,6 +325,6 @@ export async function metadataViaEndpoint(
 export const noEndpointsError = () =>
   appErrorWithMessage(
     'search_failed',
-    "This browser blocks direct YouTube search. Open NØTE on your phone, or add a playback source to search from here.",
+    "This browser blocks direct YouTube search. Open Esei on your phone, or add a playback source to search from here.",
     'CORS-blocked InnerTube request and no resolver endpoint configured'
   );

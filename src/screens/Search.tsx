@@ -216,7 +216,7 @@ export default function SearchScreen() {
 
         {isBrowsing ? (
           <>
-            <Text style={styles.sectionTitle}>Browse NØTE</Text>
+            <Text style={styles.sectionTitle}>Browse Esei</Text>
 
             <View style={styles.categoriesGrid}>
               {BROWSE_CATEGORIES.map((category) => (

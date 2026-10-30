@@ -98,7 +98,7 @@ export const PlaybackSourceSheet: React.FC<{ visible: boolean; onClose: () => vo
           </View>
 
           <Text style={styles.explainer}>
-            Search and playlists work already. To stream audio, point NØTE at a
+            Search and playlists work already. To stream audio, point Esei at a
             playback service you're authorized to use.
           </Text>
 

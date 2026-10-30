@@ -304,7 +304,7 @@ export default function LibraryScreen() {
 
           {activeFilter === 'Downloaded' && (
             <Text style={styles.emptyHint}>
-              NØTE streams on demand and doesn't store audio offline.
+              Esei streams on demand and doesn't store audio offline.
             </Text>
           )}
         </View>

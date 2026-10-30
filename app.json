@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "NOTE",
-    "slug": "NOTE",
+    "name": "Esei",
+    "slug": "esei",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -31,7 +31,7 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
-      "package": "com.sanyamjain04.NOTE"
+      "package": "com.banishwor.esei"
     },
     "web": {
       "favicon": "./assets/favicon.png"
