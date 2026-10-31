@@ -50,20 +50,20 @@ sent anywhere except the requests needed to search for and stream the audio you 
 
 Grab the signed APK from the **[releases page](https://github.com/banishwor/esei/releases)**:
 
-**[⬇ Download Esei-Phase2.2.apk](https://github.com/banishwor/esei/releases/download/v1.0.0-phase2.2/Esei-Phase2.2.apk)** (latest build)
+**[⬇ Download Esei-Phase3.apk](https://github.com/banishwor/esei/releases/download/v1.0.0-phase3/Esei-Phase3.apk)** (latest build)
 
 Verify it before installing:
 
 ```
-SHA-256  2b69345309f59f232f26d51c5e09edca565d66a34ae67ba40ada72ecd1a498a9
+SHA-256  24bf786faaf927af8ad1a05a3ab68292f7ee6c61327fa08176eee43a51fce247
 ```
 
 ```bash
 # Linux / macOS
-sha256sum Esei-Phase2.2.apk
+sha256sum Esei-Phase3.apk
 
 # Windows (PowerShell)
-Get-FileHash Esei-Phase2.2.apk -Algorithm SHA256
+Get-FileHash Esei-Phase3.apk -Algorithm SHA256
 ```
 
 Esei is **not distributed through Google Play**, so you install it by sideloading. Android
