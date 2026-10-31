@@ -226,6 +226,11 @@ export default function SettingsScreen() {
                 value={`${debugStats.saved} • ${(debugStats.bytes / 1048576).toFixed(1)} MB`}
               />
               <Divider />
+              <Row
+                label="Storage cap"
+                value={`${(debugStats.bytes / 1073741824).toFixed(2)} / 3 GB`}
+              />
+              <Divider />
               <Row label="Songs being tracked" value={`${debugStats.listening}`} />
               <Divider />
               <LinkRow

@@ -76,3 +76,13 @@ export type OfflineFileInfo = {
   /** Encrypted size in bytes; 0 when absent. */
   size: number;
 };
+
+/** Payload of the `onConnectivityChanged` event (Phase 3 offline mode). */
+export type ConnectivityChangedEvent = {
+  online: boolean;
+};
+
+/** Events the NoteNative module can send to JavaScript. */
+export type NoteNativeModuleEvents = {
+  onConnectivityChanged(event: ConnectivityChangedEvent): void;
+};

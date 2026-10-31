@@ -1,2 +1,4 @@
 <manifest>
+    <!-- Phase 3 connectivity reads (isOnline / onConnectivityChanged). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 </manifest>

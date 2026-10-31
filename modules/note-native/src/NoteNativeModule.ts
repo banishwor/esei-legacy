@@ -3,12 +3,15 @@ import { NativeModule, requireOptionalNativeModule } from 'expo';
 import {
   EncryptedDownloadResult,
   NativeStreamResult,
+  NoteNativeModuleEvents,
   OfflineFileInfo,
   PlatformInfo,
 } from './NoteNative.types';
 
-declare class NoteNativeModule extends NativeModule<{}> {
+declare class NoteNativeModule extends NativeModule<NoteNativeModuleEvents> {
   getPlatformInfo(): PlatformInfo;
+  /** Synchronous connectivity read: the active network declares internet. */
+  isOnline(): boolean;
   resolveYouTubeStream(videoId: string): Promise<NativeStreamResult>;
   downloadAndEncrypt(
     url: string,

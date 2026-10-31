@@ -38,6 +38,7 @@ export default function SearchScreen() {
     results,
     isSearching,
     error,
+    isOffline,
     searchNow,
     retry,
     clear,
@@ -214,6 +215,15 @@ export default function SearchScreen() {
           </ScrollView>
         </View>
 
+        {isOffline && (
+          <GlassCard intensity={20} style={styles.stateCard}>
+            <Text style={styles.stateText}>You're offline</Text>
+            <Text style={styles.stateHint}>
+              Offline — searching your saved songs
+            </Text>
+          </GlassCard>
+        )}
+
         {isBrowsing ? (
           <>
             <Text style={styles.sectionTitle}>Browse Esei</Text>
@@ -255,7 +265,11 @@ export default function SearchScreen() {
             {!isSearching && !error && !hasResults && (
               <GlassCard intensity={20} style={styles.stateCard}>
                 <Text style={styles.stateText}>No results for "{query.trim()}"</Text>
-                <Text style={styles.stateHint}>Try a different spelling or filter</Text>
+                <Text style={styles.stateHint}>
+                  {isOffline
+                    ? 'No saved song matches — only downloaded songs can be found offline'
+                    : 'Try a different spelling or filter'}
+                </Text>
               </GlassCard>
             )}
 

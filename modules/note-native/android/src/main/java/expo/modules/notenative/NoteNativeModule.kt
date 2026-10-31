@@ -1,5 +1,9 @@
 package expo.modules.notenative
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -43,6 +47,9 @@ class NoteNativeModule : Module() {
 
     @Volatile
     var initialized = false
+
+    /** Event name for connectivity changes (Phase 3 offline mode). */
+    const val CONNECTIVITY_EVENT = "onConnectivityChanged"
   }
 
   override fun definition() = ModuleDefinition {
@@ -54,6 +61,24 @@ class NoteNativeModule : Module() {
         "native" to true,
         "androidSdkInt" to Build.VERSION.SDK_INT
       )
+    }
+
+    // Phase 3: connectivity for the offline Home/Search modes. A one-shot
+    // read plus a change event while JS is listening. "Online" means the
+    // active network declares internet capability; airplane mode (no
+    // active network) reads as offline.
+    Events(CONNECTIVITY_EVENT)
+
+    Function("isOnline") {
+      return@Function isOnlineNow()
+    }
+
+    OnStartObserving(CONNECTIVITY_EVENT) {
+      registerNetworkCallback()
+    }
+
+    OnStopObserving(CONNECTIVITY_EVENT) {
+      unregisterNetworkCallback()
     }
 
     // AsyncFunction runs off the JS thread, which is required here: extraction
@@ -80,6 +105,66 @@ class NoteNativeModule : Module() {
       val (exists, size) = store().fileInfo(sourceId)
       mapOf("exists" to exists, "size" to size)
     }
+  }
+
+  // ---- connectivity (Phase 3) ---------------------------------------------
+
+  private fun appContextOrNull(): Context? =
+    appContext.reactContext?.applicationContext
+      ?: appContext.currentActivity?.applicationContext
+
+  private fun connectivityManager(): ConnectivityManager? =
+    appContextOrNull()?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+
+  /**
+   * Whether the device currently has an internet-capable network. Any
+   * failure (no context, no permission, no network) reads as offline --
+   * the UI only uses this to fall back to saved songs, never to block.
+   */
+  private fun isOnlineNow(): Boolean {
+    return try {
+      val cm = connectivityManager() ?: return false
+      val network = cm.activeNetwork ?: return false
+      val caps = cm.getNetworkCapabilities(network) ?: return false
+      caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    } catch (e: Throwable) {
+      false
+    }
+  }
+
+  @Volatile
+  private var lastSentOnline: Boolean? = null
+
+  private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+    override fun onAvailable(network: Network) = emitConnectivity()
+    override fun onLost(network: Network) = emitConnectivity()
+    override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) =
+      emitConnectivity()
+  }
+
+  private fun emitConnectivity() {
+    val online = isOnlineNow()
+    if (online == lastSentOnline) return
+    lastSentOnline = online
+    sendEvent(CONNECTIVITY_EVENT, mapOf("online" to online))
+  }
+
+  private fun registerNetworkCallback() {
+    try {
+      lastSentOnline = isOnlineNow()
+      connectivityManager()?.registerDefaultNetworkCallback(networkCallback)
+    } catch (e: Throwable) {
+      // Without the callback JS still re-checks isOnline on focus/AppState.
+    }
+  }
+
+  private fun unregisterNetworkCallback() {
+    try {
+      connectivityManager()?.unregisterNetworkCallback(networkCallback)
+    } catch (e: Throwable) {
+      // Already unregistered (or never registered): harmless.
+    }
+    lastSentOnline = null
   }
 
   private fun store(): EncryptedStore {

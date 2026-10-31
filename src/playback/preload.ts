@@ -1,5 +1,6 @@
 import { Track } from '../core/types';
 import { streamResolver } from '../providers/stream/StreamResolver';
+import { DownloadService } from '../services/DownloadService';
 
 /**
  * Rolling next-track preloader.
@@ -35,6 +36,11 @@ class PreloadManager {
 
     // A different track is wanted now, so the previous one is obsolete.
     this.cancel();
+
+    // A saved track needs no warming: the player will take it from local
+    // storage (Phase 3 storage-first), so a network resolve would be pure
+    // waste — and a guaranteed failure when offline.
+    if (DownloadService.isDownloaded(track.id)) return;
 
     if (!streamResolver.canResolve(track)) return;
     // Already cached and unexpired: nothing to do.

@@ -120,3 +120,37 @@ export async function offlineFileInfo(
     return { exists: false, size: 0 };
   }
 }
+
+/**
+ * One-shot connectivity read (Phase 3). Null when the native module is
+ * absent, so callers can tell "unknown" apart from a real offline reading
+ * and keep their previous behaviour.
+ */
+export function getOnlineStatus(): boolean | null {
+  const module = NoteNativeModule;
+  if (!module) return null;
+  try {
+    return module.isOnline();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Subscribe to connectivity changes. Returns an unsubscribe function; a
+ * no-op when the native module is absent (callers re-check on focus).
+ */
+export function addConnectivityListener(
+  listener: (online: boolean) => void
+): () => void {
+  const module = NoteNativeModule;
+  if (!module) return () => undefined;
+  try {
+    const subscription = module.addListener('onConnectivityChanged', (event) => {
+      listener(Boolean(event?.online));
+    });
+    return () => subscription.remove();
+  } catch {
+    return () => undefined;
+  }
+}

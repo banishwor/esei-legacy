@@ -12,6 +12,11 @@ class NoteNativeModule extends NativeModule<{}> {
     return { platform: 'web', native: false };
   }
 
+  /** Web has no ConnectivityManager; the browser is treated as online. */
+  isOnline(): boolean {
+    return true;
+  }
+
   /** There is no extractor on web; callers fall through to the next source. */
   async resolveYouTubeStream(): Promise<NativeStreamResult> {
     return {

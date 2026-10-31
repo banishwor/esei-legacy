@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { messageFor } from '../core/errors';
-import { EMPTY_SEARCH_RESULTS, SearchFilter, SearchResults } from '../core/types';
+import {
+  EMPTY_SEARCH_RESULTS,
+  SearchFilter,
+  SearchResults,
+  emptySearchResults,
+} from '../core/types';
+import { ConnectivityService } from '../services/ConnectivityService';
+import { DownloadService } from '../services/DownloadService';
 import { LibraryService } from '../services/LibraryService';
 import { MusicService } from '../services/MusicService';
 
@@ -15,6 +22,8 @@ type UseSearch = {
   suggestions: string[];
   isSearching: boolean;
   error: string | null;
+  /** True while results come from the local saved songs (no internet). */
+  isOffline: boolean;
   /** Run a search immediately, bypassing the debounce (category taps, submit). */
   searchNow: (q: string, filter?: SearchFilter) => void;
   retry: () => void;
@@ -36,6 +45,7 @@ export function useSearch(): UseSearch {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -63,6 +73,24 @@ export function useSearch(): UseSearch {
 
     setIsSearching(true);
     setError(null);
+
+    // Phase 3: with no internet, search runs locally over the saved
+    // songs instead of failing. Their rows play through storage-first
+    // playback, so local results are fully playable offline.
+    if (!ConnectivityService.check()) {
+      setIsOffline(true);
+      await DownloadService.load();
+      if (id !== requestId.current) return; // superseded while loading
+
+      const local = emptySearchResults(trimmed);
+      if (f === 'All' || f === 'Songs') {
+        local.tracks = DownloadService.searchSaved(trimmed);
+      }
+      setResults(local);
+      setIsSearching(false);
+      return;
+    }
+    setIsOffline(false);
 
     try {
       const found = await MusicService.search(trimmed, {
@@ -119,9 +147,15 @@ export function useSearch(): UseSearch {
       return;
     }
 
+    // No suggestions offline: there is nothing local to suggest from.
+    if (!ConnectivityService.current()) {
+      setSuggestions([]);
+      return;
+    }
+
     let cancelled = false;
     const timer = setTimeout(async () => {
-      const found = await MusicService.getSuggestions(trimmed);
+      const found = await MusicService.getSuggestions(trimmed).catch(() => []);
       if (!cancelled) setSuggestions(found);
     }, DEBOUNCE_MS + 100);
 
@@ -130,6 +164,26 @@ export function useSearch(): UseSearch {
       clearTimeout(timer);
     };
   }, [query]);
+
+  // Follow connectivity while the screen is alive: going offline swaps
+  // an in-flight intent to local search; coming back online re-runs the
+  // same query against the network so results upgrade on their own.
+  const wasOffline = useRef(false);
+  useEffect(() => {
+    const onlineNow = ConnectivityService.check();
+    wasOffline.current = !onlineNow;
+    setIsOffline(!onlineNow);
+    return ConnectivityService.subscribe((online) => {
+      if (!online) {
+        wasOffline.current = true;
+        setIsOffline(true);
+        if (active.current.q) void run(active.current.q, active.current.filter);
+      } else if (wasOffline.current) {
+        wasOffline.current = false;
+        if (active.current.q) void run(active.current.q, active.current.filter);
+      }
+    });
+  }, [run]);
 
   useEffect(
     () => () => {
@@ -178,6 +232,7 @@ export function useSearch(): UseSearch {
     suggestions,
     isSearching,
     error,
+    isOffline,
     searchNow,
     retry,
     clear,

@@ -189,15 +189,22 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       lastAttempt.current = { track, position: options.startPosition ?? 0 };
 
       try {
-        // An explicit offline play (Offline section) hands us its stream;
-        // anything else resolves over the network as usual. Phase 3 will
-        // decide when normal plays should also prefer the local file.
+        // An explicit offline play (Offline section) hands us its stream.
+        // Every other play is storage-first (Phase 3): if this track is
+        // saved, it plays from its encrypted local file — no network, no
+        // re-download — whatever screen started it (Search, Home recents,
+        // History, Liked, playlists, the queue). Only unsaved tracks, and
+        // stale records (which getSavedStream drops), fall through to a
+        // network resolve. loadCurrent is the one choke point every play
+        // action funnels through, so this single check covers them all.
         let stream: ResolvedStream;
         if (forcedStream.current?.trackId === track.id) {
           stream = forcedStream.current.stream;
           forcedStream.current = null;
         } else {
-          stream = await MusicService.resolveStream(track, controller.signal);
+          const saved = await DownloadService.getSavedStream(track);
+          if (id !== loadId.current) return; // superseded by a newer load
+          stream = saved ?? (await MusicService.resolveStream(track, controller.signal));
         }
         if (id !== loadId.current) return; // superseded by a newer load
 
@@ -453,9 +460,11 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   /**
    * Play a saved song from its encrypted local file.
    *
-   * The queue becomes just this song: what plays next after an offline play
-   * is Phase 3's storage-first question, and quietly falling back to the
-   * network here would defeat the point of an offline play.
+   * The queue becomes just this song — an explicit offline play means
+   * "this saved song", not a queue that later drifts back to streaming.
+   * General storage-first playback for ordinary plays lives in
+   * loadCurrent; this entry point additionally pins the exact record the
+   * user tapped.
    */
   const playOffline = useCallback(
     (record: DownloadedTrack) => {

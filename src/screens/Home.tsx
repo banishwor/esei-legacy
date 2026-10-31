@@ -19,10 +19,13 @@ import { Track } from '../core/types';
 import { FEATURED_QUERY, randomQueryFor } from '../data/catalog';
 import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
+import { useOnline } from '../hooks/useOnline';
+import { ConnectivityService } from '../services/ConnectivityService';
+import { DownloadService, DownloadedTrack } from '../services/DownloadService';
 import { MusicService } from '../services/MusicService';
 import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 const CATEGORIES = ['Music', 'Podcasts', 'Radio'];
 
@@ -46,6 +49,35 @@ export default function HomeScreen() {
 
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [featured, setFeatured] = useState<Track[]>([]);
+
+  // Phase 3 offline Home: no internet → the saved songs ARE the home
+  // screen. Refreshed on every focus (and re-checked against the native
+  // connectivity reading, so toggling airplane mode is picked up).
+  const online = useOnline();
+  const [savedSongs, setSavedSongs] = useState<DownloadedTrack[]>([]);
+
+  useFocusEffect(
+    useCallback(() => {
+      ConnectivityService.check();
+      let live = true;
+      (async () => {
+        await DownloadService.load();
+        if (live) setSavedSongs(DownloadService.getDownloads());
+      })();
+      return () => {
+        live = false;
+      };
+    }, [])
+  );
+
+  /** Play within the saved list, so next/previous stay offline too. */
+  const playSaved = useCallback(
+    (track: Track) => {
+      const tracks = savedSongs.map((s) => DownloadService.toTrack(s));
+      playTrack(track, { tracks, label: 'Saved offline' });
+    },
+    [playTrack, savedSongs]
+  );
 
   /** Shown before anything has been played: a live pick, not mock data. */
   const [starter, setStarter] = useState<Track[]>([]);
@@ -170,6 +202,52 @@ export default function HomeScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {!online ? (
+          <>
+            <GlassCard intensity={20} style={styles.emptyCard}>
+              <Text style={styles.emptyText}>You're offline</Text>
+              <Text style={styles.emptyHint}>
+                No internet right now — here are the songs saved on this
+                phone. They play without a connection.
+              </Text>
+            </GlassCard>
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Saved songs</Text>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('LibraryTab' as never)}
+              >
+                <Text style={styles.seeAll}>Library</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.listContainer}>
+              {savedSongs.length > 0 ? (
+                savedSongs.map((record) => {
+                  const track = DownloadService.toTrack(record);
+                  return (
+                    <TrackRow
+                      key={track.id}
+                      track={track}
+                      onPress={playSaved}
+                      onMorePress={setAddingTrack}
+                      isPlaying={currentTrack?.id === track.id && isPlaying}
+                    />
+                  );
+                })
+              ) : (
+                <GlassCard intensity={20} style={styles.emptyCard}>
+                  <Text style={styles.emptyText}>Nothing saved yet</Text>
+                  <Text style={styles.emptyHint}>
+                    Songs you listen to past halfway are saved here for
+                    offline listening.
+                  </Text>
+                </GlassCard>
+              )}
+            </View>
+          </>
+        ) : (
+          <>
         <View style={styles.pillsContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {CATEGORIES.map(cat => (
@@ -249,6 +327,8 @@ export default function HomeScreen() {
             </GlassCard>
           )}
         </View>
+          </>
+        )}
 
       </ScrollView>
 

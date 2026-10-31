@@ -12,17 +12,18 @@ import {
   STORAGE_KEYS,
 } from '../core/storage';
 import { ResolvedStream, Track } from '../core/types';
+import { LibraryService } from './LibraryService';
 import { MusicService } from './MusicService';
 
 /**
- * Listening-time tracking + encrypted offline storage (Phases 1-2).
+ * Listening-time tracking + encrypted offline storage (Phases 1-3).
  *
  * Two persistent stores, both keyed by the composite track id
- * (`<provider>:<sourceId>`), so Phase 3 (storage-first playback, 3 GB
- * eviction) can join them by id:
+ * (`<provider>:<sourceId>`), so storage-first playback and the 3 GB
+ * eviction can join them by id:
  *
  *   listening  trackId -> total seconds actually listened. This total is the
- *              eviction score Phase 3 will rank downloads by.
+ *              eviction score the 3 GB cap ranks downloads by.
  *   downloads  trackId -> the saved (encrypted) file and its metadata.
  *
  * "Actually listened" is measured from playback position deltas while the
@@ -93,6 +94,10 @@ const SEEK_TOLERANCE_SECONDS = 2;
 const DOWNLOAD_TRIGGER_RATIO = 0.5;
 /** A failed download is not retried more often than this. */
 const RETRY_BACKOFF_MS = 60_000;
+/** Phase 3: total saved audio is capped; saves beyond this evict. */
+export const STORAGE_CAP_BYTES = 3 * 1024 * 1024 * 1024;
+/** Phase 3: a save younger than this is never evicted. */
+const EVICTION_PROTECT_MS = 7 * 24 * 60 * 60 * 1000;
 
 type PlaybackObservation = {
   isPlaying: boolean;
@@ -117,6 +122,11 @@ class DownloadServiceImpl {
   // ---- per-play session state (in-memory only) ----
   private sessionKey: unknown = null;
   private sessionTrackId: string | null = null;
+  /**
+   * The track most recently fed to observe() — in practice the one on the
+   * player right now. Eviction never removes the song being listened to.
+   */
+  private lastObservedTrackId: string | null = null;
   private lastPosition = 0;
   private lastStamp = 0;
   /** Seconds counted toward the listening total within the current play. */
@@ -274,6 +284,35 @@ class DownloadServiceImpl {
   }
 
   /**
+   * Phase 3 storage-first lookup: the playable local stream for a track,
+   * or null when the track is not saved (or its record was stale, in
+   * which case getOfflineStream has already dropped it). The player calls
+   * this for EVERY play, from every screen, before any network resolve.
+   */
+  async getSavedStream(track: Track): Promise<ResolvedStream | null> {
+    await this.load();
+    const record = this.downloads.get(track.id);
+    if (!record) return null;
+    return this.getOfflineStream(record);
+  }
+
+  /**
+   * Phase 3 offline search: match a query against the saved songs'
+   * titles and artists. Every word in the query must appear, so
+   * "artist song" narrows instead of broadening. Newest saves first.
+   */
+  searchSaved(query: string): Track[] {
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return [];
+    return this.getDownloads()
+      .filter((d) => {
+        const haystack = `${d.title} ${d.artist}`.toLowerCase();
+        return terms.every((t) => haystack.includes(t));
+      })
+      .map((d) => this.toTrack(d));
+  }
+
+  /**
    * A playable stream for a saved song: the native loopback URL that
    * decrypts it on the fly. Null when the file is gone, in which case the
    * stale record is dropped so the song can save again on a later listen.
@@ -302,6 +341,72 @@ class DownloadServiceImpl {
     await deleteOfflineFile(record.sourceId);
     this.downloads.delete(record.trackId);
     this.persistDownloads();
+  }
+
+  /**
+   * Phase 3 storage cap: after a save, if the saved songs total more than
+   * STORAGE_CAP_BYTES, evict until back under it. Eviction order is the
+   * settled rule — least accumulated listening first (the record's stored
+   * listeningSeconds), oldest save first on a tie.
+   *
+   * Never evicted, whatever the pressure:
+   *   - Liked songs,
+   *   - songs saved within the last 7 days,
+   *   - the song currently playing / most recently observed.
+   * If everything over the cap is protected, the library stays over the
+   * cap rather than breaking one of those promises.
+   */
+  private async enforceStorageCap(): Promise<void> {
+    try {
+      await this.enforceStorageCapInner();
+    } catch (e) {
+      // Eviction is housekeeping after a successful save; it must never
+      // turn that save into a reported failure.
+      if (__DEV__) console.log('[downloads] cap enforcement failed', e);
+    }
+  }
+
+  private async enforceStorageCapInner(): Promise<void> {
+    let total = this.totalDownloadedBytes();
+    if (total <= STORAGE_CAP_BYTES) return;
+
+    // Liked state must be loaded before it can protect anything.
+    await LibraryService.load();
+
+    const now = Date.now();
+    const candidates = [...this.downloads.values()]
+      .filter((d) => d.trackId !== this.lastObservedTrackId)
+      .filter((d) => now - d.downloadedAt >= EVICTION_PROTECT_MS)
+      .filter((d) => !LibraryService.isLiked(d.trackId))
+      .sort(
+        (a, b) =>
+          a.listeningSeconds - b.listeningSeconds || a.downloadedAt - b.downloadedAt
+      );
+
+    const removed: DownloadedTrack[] = [];
+    for (const candidate of candidates) {
+      if (total <= STORAGE_CAP_BYTES) break;
+      await this.deleteDownload(candidate);
+      total -= candidate.fileSize || 0;
+      removed.push(candidate);
+    }
+
+    if (removed.length) {
+      this.recordEvent({
+        trackId: removed[0].trackId,
+        title: 'Storage cleanup',
+        success: true,
+        reason: `Removed ${removed.map((r) => `"${r.title}"`).join(', ')} to free space (3 GB limit)`,
+        at: Date.now(),
+      });
+      if (__DEV__) {
+        console.log(
+          '[downloads] evicted',
+          removed.map((r) => r.title),
+          'to get under the 3 GB cap'
+        );
+      }
+    }
   }
 
   // ---- persistence helpers ----------------------------------------------------
@@ -357,6 +462,7 @@ class DownloadServiceImpl {
    */
   observe(track: Track, status: PlaybackObservation, sessionKey: unknown): void {
     const now = Date.now();
+    this.lastObservedTrackId = track.id;
     const duration = status.duration || track.duration || 0;
 
     if (this.sessionKey !== sessionKey || this.sessionTrackId !== track.id) {
@@ -470,6 +576,10 @@ class DownloadServiceImpl {
         console.log('[downloads] saved (encrypted)', record.title, record.fileSize, 'bytes');
       }
       for (const listener of this.completeListeners) listener(record);
+
+      // Phase 3: a save that pushes the library past 3 GB evicts the
+      // least-listened unprotected songs until it fits again.
+      await this.enforceStorageCap();
     } catch (e) {
       this.lastFailedAt.set(track.id, Date.now());
       // Failures are no longer silent (Phase 1's were): the Offline section
