@@ -17,7 +17,6 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.URL
 import java.security.KeyStore
-import java.security.SecureRandom
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
@@ -75,7 +74,6 @@ class EncryptedStore private constructor(context: Context) {
   }
 
   private val dir: File = File(context.filesDir, DIR_NAME)
-  private val random = SecureRandom()
 
   // ---- key management -----------------------------------------------------
 
@@ -173,8 +171,16 @@ class EncryptedStore private constructor(context: Context) {
             }
             if (filled == 0) break
 
-            val nonce = ByteArray(NONCE_SIZE).also { random.nextBytes(it) }
-            cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_BITS, nonce))
+            // Android Keystore keys refuse caller-provided IVs for GCM
+            // encryption ("Caller-provided IV not permitted" on device),
+            // so let the cipher generate this chunk's nonce and read it
+            // back — it is stored in the clear in front of the chunk,
+            // exactly like a caller-chosen nonce would have been.
+            // (Decryption below may pass the stored nonce: the Keystore
+            // restriction applies to encryption only.)
+            cipher.init(Cipher.ENCRYPT_MODE, key)
+            val nonce = cipher.iv
+            require(nonce.size == NONCE_SIZE) { "Unexpected GCM nonce size ${nonce.size}" }
             val ciphertext = cipher.doFinal(plain, 0, filled)
             out.write(nonce)
             out.write(ciphertext)
