@@ -1,5 +1,6 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  Alert,
   Keyboard,
   Linking,
   ScrollView,
@@ -16,6 +17,9 @@ import { useNavigation } from '@react-navigation/native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { Gender } from '../services/LibraryService';
 import { useLibrary } from '../hooks/useLibrary';
+import { usePlayer } from '../hooks/usePlayer';
+import { DownloadService } from '../services/DownloadService';
+import { isDebugUnlocked } from '../core/debug';
 
 const GENDERS: { value: Gender; label: string }[] = [
   { value: 'male', label: 'Male' },
@@ -40,8 +44,73 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { profile, saveProfile, history, playlists, liked } = useLibrary();
+  const { currentTrack } = usePlayer();
 
   const [name, setName] = useState(profile.name);
+
+  // Hidden debug mode: unlocked by setting the profile name to "Bani"
+  // (see src/core/debug.ts). Test tools for the saving feature.
+  const debugUnlocked = isDebugUnlocked(profile.name);
+  const [debugStats, setDebugStats] = useState({ saved: 0, bytes: 0, listening: 0 });
+  const refreshDebug = useCallback(async () => {
+    await DownloadService.load();
+    setDebugStats({
+      saved: DownloadService.getDownloads().length,
+      bytes: DownloadService.totalDownloadedBytes(),
+      listening: DownloadService.getListeningRecords().length,
+    });
+  }, []);
+  useEffect(() => {
+    if (debugUnlocked) void refreshDebug();
+  }, [debugUnlocked, refreshDebug]);
+
+  const debugForceSave = useCallback(() => {
+    if (!currentTrack) return;
+    void (async () => {
+      await DownloadService.forceDownload(currentTrack);
+      await refreshDebug();
+    })();
+  }, [currentTrack, refreshDebug]);
+
+  const debugResetListening = useCallback(() => {
+    Alert.alert(
+      'Reset listening progress?',
+      'All accumulated listening time is forgotten. Songs will count from zero again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              await DownloadService.resetListening();
+              await refreshDebug();
+            })();
+          },
+        },
+      ]
+    );
+  }, [refreshDebug]);
+
+  const debugDeleteAll = useCallback(() => {
+    Alert.alert(
+      'Delete all saved songs?',
+      'Every encrypted saved song on this phone is removed. They save again if you listen past halfway.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete all',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              await DownloadService.deleteAllDownloads();
+              await refreshDebug();
+            })();
+          },
+        },
+      ]
+    );
+  }, [refreshDebug]);
 
   const version =
     Constants.expoConfig?.version ?? Constants.manifest2?.extra?.expoClient?.version ?? '1.0.0';
@@ -146,6 +215,34 @@ export default function SettingsScreen() {
           <Divider />
           <LinkRow label="Source code" onPress={() => open(REPO_URL)} />
         </View>
+
+        {/* ---- Debug (hidden: profile name "Bani") ---- */}
+        {debugUnlocked && (
+          <>
+            <Text style={styles.sectionLabel}>DEBUG MODE</Text>
+            <View style={styles.card}>
+              <Row
+                label="Saved songs"
+                value={`${debugStats.saved} • ${(debugStats.bytes / 1048576).toFixed(1)} MB`}
+              />
+              <Divider />
+              <Row label="Songs being tracked" value={`${debugStats.listening}`} />
+              <Divider />
+              <LinkRow
+                label={
+                  currentTrack
+                    ? `Save "${currentTrack.title}" now`
+                    : 'Save current song now (nothing playing)'
+                }
+                onPress={debugForceSave}
+              />
+              <Divider />
+              <LinkRow label="Reset listening progress" onPress={debugResetListening} />
+              <Divider />
+              <LinkRow label="Delete all saved songs" onPress={debugDeleteAll} />
+            </View>
+          </>
+        )}
 
         {/* ---- Legal ---- */}
         <Text style={styles.sectionLabel}>LICENCE</Text>

@@ -109,6 +109,8 @@ class DownloadServiceImpl {
   private lastFailedAt = new Map<string, number>();
   private completeListeners = new Set<(record: DownloadedTrack) => void>();
   private lastEvent: LastDownloadEvent | null = null;
+  /** Recent download outcomes, newest first (debug mode log). */
+  private events: LastDownloadEvent[] = [];
 
   private loadPromise: Promise<void> | null = null;
 
@@ -126,10 +128,11 @@ class DownloadServiceImpl {
   }
 
   private async performLoad(): Promise<void> {
-    const [listening, downloads, lastEvent] = await Promise.all([
+    const [listening, downloads, lastEvent, events] = await Promise.all([
       readJson<Record<string, ListeningRecord>>(STORAGE_KEYS.listening, {}),
       readJson<DownloadedTrack[]>(STORAGE_KEYS.downloads, []),
       readJson<LastDownloadEvent | null>(STORAGE_KEYS.downloadEvent, null),
+      readJson<LastDownloadEvent[]>(STORAGE_KEYS.downloadEvents, []),
     ]);
 
     if (listening && typeof listening === 'object') {
@@ -158,6 +161,12 @@ class DownloadServiceImpl {
 
     if (lastEvent && typeof lastEvent.at === 'number') {
       this.lastEvent = lastEvent;
+    }
+    if (Array.isArray(events)) {
+      this.events = events.filter((e) => e && typeof e.at === 'number').slice(0, 20);
+    }
+    if (!this.events.length && this.lastEvent) {
+      this.events = [this.lastEvent];
     }
   }
 
@@ -305,7 +314,38 @@ class DownloadServiceImpl {
 
   private recordEvent(event: LastDownloadEvent): void {
     this.lastEvent = event;
+    this.events = [event, ...this.events].slice(0, 20);
     void writeJson(STORAGE_KEYS.downloadEvent, event);
+    void writeJson(STORAGE_KEYS.downloadEvents, this.events);
+  }
+
+  /** Recent download outcomes, newest first (debug mode log). */
+  getDownloadEvents(): LastDownloadEvent[] {
+    return [...this.events];
+  }
+
+  // ---- debug-mode tools -----------------------------------------------------
+
+  /** Save a track right now, ignoring the 50% trigger and failure backoff. */
+  async forceDownload(track: Track): Promise<void> {
+    await this.maybeDownload(track, { force: true });
+  }
+
+  /** Forget all accumulated listening time (debug mode: clean retests). */
+  async resetListening(): Promise<void> {
+    this.listening.clear();
+    this.lastFailedAt.clear();
+    await writeJson(STORAGE_KEYS.listening, {});
+  }
+
+  /** Remove every saved song: encrypted files and records (debug mode). */
+  async deleteAllDownloads(): Promise<void> {
+    const records = [...this.downloads.values()];
+    for (const record of records) {
+      await deleteOfflineFile(record.sourceId);
+    }
+    this.downloads.clear();
+    this.persistDownloads();
   }
 
   // ---- listening-time tracking ------------------------------------------
@@ -375,13 +415,15 @@ class DownloadServiceImpl {
    * the trigger: downloaded/downloading tracks and a post-failure backoff
    * make repeat calls cheap no-ops.
    */
-  async maybeDownload(track: Track): Promise<void> {
+  async maybeDownload(track: Track, opts?: { force?: boolean }): Promise<void> {
     await this.load();
 
     if (this.downloads.has(track.id) || this.downloading.has(track.id)) return;
 
-    const failedAt = this.lastFailedAt.get(track.id);
-    if (failedAt && Date.now() - failedAt < RETRY_BACKOFF_MS) return;
+    if (!opts?.force) {
+      const failedAt = this.lastFailedAt.get(track.id);
+      if (failedAt && Date.now() - failedAt < RETRY_BACKOFF_MS) return;
+    }
 
     this.downloading.add(track.id);
     try {

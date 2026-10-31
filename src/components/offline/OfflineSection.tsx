@@ -11,6 +11,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Lock, Trash2 } from 'lucide-react-native';
 import { COLORS, FONTS, SIZES } from '../../constants/theme';
 import { usePlayer } from '../../hooks/usePlayer';
+import { useLibrary } from '../../hooks/useLibrary';
+import { isDebugUnlocked } from '../../core/debug';
 import {
   DownloadService,
   DownloadedTrack,
@@ -68,11 +70,14 @@ function formatWhen(epochMs: number): string {
 
 export const OfflineSection: React.FC = () => {
   const { playOffline, currentTrack, isPlaying } = usePlayer();
+  const { profile } = useLibrary();
+  const debugUnlocked = isDebugUnlocked(profile.name);
   const [downloads, setDownloads] = useState<DownloadedTrack[]>([]);
   const [inProgress, setInProgress] = useState<
     { record: ListeningRecord; ratio: number; saving: boolean }[]
   >([]);
   const [lastEvent, setLastEvent] = useState<LastDownloadEvent | null>(null);
+  const [events, setEvents] = useState<LastDownloadEvent[]>([]);
   const [totalBytes, setTotalBytes] = useState(0);
   const mounted = useRef(true);
 
@@ -82,6 +87,7 @@ export const OfflineSection: React.FC = () => {
     setDownloads(DownloadService.getDownloads());
     setInProgress(DownloadService.getInProgress());
     setLastEvent(DownloadService.getLastDownloadEvent());
+    setEvents(DownloadService.getDownloadEvents());
     setTotalBytes(DownloadService.totalDownloadedBytes());
   }, []);
 
@@ -214,7 +220,7 @@ export const OfflineSection: React.FC = () => {
                 <Text style={styles.subtitle} numberOfLines={1}>
                   {saving
                     ? 'Saving now — encrypting to this phone…'
-                    : `${record.artist ? `${record.artist} • ` : ''}${Math.floor(ratio * 100)}% listened — saves at 50%`}
+                    : `${record.artist ? `${record.artist} • ` : ''}${Math.floor(ratio * 100)}% listened — saves at 50%${debugUnlocked ? ` • ${Math.round(record.totalSeconds)}s of ${record.duration}s` : ''}`}
                 </Text>
                 <View style={styles.progressTrack}>
                   <View
@@ -241,6 +247,19 @@ export const OfflineSection: React.FC = () => {
           forward doesn't count — and it will appear here, ready to play with
           no internet at all.
         </Text>
+      )}
+
+      {debugUnlocked && events.length > 0 && (
+        <View style={styles.progressSection}>
+          <Text style={styles.sectionLabel}>SAVE LOG (DEBUG)</Text>
+          {events.slice(0, 10).map((e, i) => (
+            <Text key={`${e.at}-${i}`} style={styles.subtitle} numberOfLines={2}>
+              {new Date(e.at).toLocaleTimeString()}{' '}
+              {e.success ? '✓ Saved' : `✗ Failed`} "{e.title}"
+              {e.reason ? ` — ${e.reason}` : ''}
+            </Text>
+          ))}
+        </View>
       )}
     </View>
   );

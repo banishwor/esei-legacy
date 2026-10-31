@@ -92,4 +92,6 @@ export const STORAGE_KEYS = {
   downloads: 'downloads',
   /** Most recent auto-download outcome, success or failure (Phase 2). */
   downloadEvent: 'download-event',
+  /** Recent auto-download outcomes, newest first (debug mode log). */
+  downloadEvents: 'download-events',
 } as const;
