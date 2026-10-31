@@ -70,7 +70,7 @@ export const OfflineSection: React.FC = () => {
   const { playOffline, currentTrack, isPlaying } = usePlayer();
   const [downloads, setDownloads] = useState<DownloadedTrack[]>([]);
   const [inProgress, setInProgress] = useState<
-    { record: ListeningRecord; ratio: number }[]
+    { record: ListeningRecord; ratio: number; saving: boolean }[]
   >([]);
   const [lastEvent, setLastEvent] = useState<LastDownloadEvent | null>(null);
   const [totalBytes, setTotalBytes] = useState(0);
@@ -205,21 +205,27 @@ export const OfflineSection: React.FC = () => {
       {inProgress.length > 0 && (
         <View style={styles.progressSection}>
           <Text style={styles.sectionLabel}>ON THE WAY TO SAVING</Text>
-          {inProgress.map(({ record, ratio }) => (
+          {inProgress.map(({ record, ratio, saving }) => (
             <View key={record.trackId} style={styles.progressRow}>
               <View style={styles.info}>
                 <Text style={styles.title} numberOfLines={1}>
                   {record.title ?? 'Unknown title'}
                 </Text>
                 <Text style={styles.subtitle} numberOfLines={1}>
-                  {record.artist ? `${record.artist} • ` : ''}
-                  {Math.floor(ratio * 100)}% listened — saves at 50%
+                  {saving
+                    ? 'Saving now — encrypting to this phone…'
+                    : `${record.artist ? `${record.artist} • ` : ''}${Math.floor(ratio * 100)}% listened — saves at 50%`}
                 </Text>
                 <View style={styles.progressTrack}>
                   <View
                     style={[
                       styles.progressFill,
-                      { width: `${Math.min(100, Math.max(2, ratio * 100))}%` },
+                      {
+                        width: saving
+                          ? '100%'
+                          : `${Math.min(100, Math.max(2, ratio * 100))}%`,
+                        opacity: saving ? 0.45 : 1,
+                      },
                     ]}
                   />
                 </View>

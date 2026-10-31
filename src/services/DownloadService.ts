@@ -220,17 +220,22 @@ class DownloadServiceImpl {
    * Tracks on their way to the download trigger: some listening logged,
    * duration known, not yet saved. Sorted by progress so the closest to
    * saving reads first. Powers the Offline section's progress list.
+   *
+   * A track whose download is in flight stays in this list flagged
+   * `saving` — hiding it while it downloaded made a song appear to
+   * vanish at the trigger point with nothing to show for it.
    */
-  getInProgress(): { record: ListeningRecord; ratio: number }[] {
-    const out: { record: ListeningRecord; ratio: number }[] = [];
+  getInProgress(): { record: ListeningRecord; ratio: number; saving: boolean }[] {
+    const out: { record: ListeningRecord; ratio: number; saving: boolean }[] = [];
     for (const record of this.listening.values()) {
-      if (this.downloads.has(record.trackId) || this.downloading.has(record.trackId)) {
+      if (this.downloads.has(record.trackId)) {
         continue;
       }
       if (record.duration <= 0 || record.totalSeconds <= 0) continue;
       out.push({
         record,
         ratio: Math.min(1, record.totalSeconds / record.duration),
+        saving: this.downloading.has(record.trackId),
       });
     }
     return out.sort((a, b) => b.ratio - a.ratio);
