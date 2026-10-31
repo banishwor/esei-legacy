@@ -1,18 +1,29 @@
-import { Directory, File, Paths } from 'expo-file-system';
-import { readJson, writeJsonDebounced, STORAGE_KEYS } from '../core/storage';
-import { Track } from '../core/types';
+import { Directory, Paths } from 'expo-file-system';
+import {
+  deleteOfflineFile,
+  downloadAndEncryptStream,
+  getOfflinePlaybackUrl,
+  offlineFileInfo,
+} from '../../modules/note-native';
+import {
+  readJson,
+  writeJson,
+  writeJsonDebounced,
+  STORAGE_KEYS,
+} from '../core/storage';
+import { ResolvedStream, Track } from '../core/types';
 import { MusicService } from './MusicService';
 
 /**
- * Phase 1: listening-time tracking + auto-download.
+ * Listening-time tracking + encrypted offline storage (Phases 1-2).
  *
  * Two persistent stores, both keyed by the composite track id
- * (`<provider>:<sourceId>`), so Phase 2 (Offline section) and Phase 3
- * (storage-first playback, 3 GB eviction) can join them by id:
+ * (`<provider>:<sourceId>`), so Phase 3 (storage-first playback, 3 GB
+ * eviction) can join them by id:
  *
  *   listening  trackId -> total seconds actually listened. This total is the
  *              eviction score Phase 3 will rank downloads by.
- *   downloads  trackId -> the downloaded file and its metadata.
+ *   downloads  trackId -> the saved (encrypted) file and its metadata.
  *
  * "Actually listened" is measured from playback position deltas while the
  * player reports playing, cross-checked against wall-clock time: a seek
@@ -20,6 +31,15 @@ import { MusicService } from './MusicService';
  * instead of counted. Within one play (one load of a track) at most one
  * full duration is counted, so looping or scrubbing back and replaying a
  * section cannot inflate the score past the track's length per play.
+ *
+ * Phase 2: when a track crosses the trigger, its audio is downloaded by the
+ * native module straight into AES-256-GCM encrypted storage (Android
+ * Keystore key) -- no plain audio file ever exists. Playback of a saved
+ * song goes through the native loopback server, which decrypts on the fly.
+ *
+ * Every download attempt, success or failure, is recorded as the persistent
+ * `lastEvent`, because Phase 1's only signal (a toast) was easy to miss and
+ * its failures were silent. The Offline section shows that event.
  */
 
 export type ListeningRecord = {
@@ -28,6 +48,9 @@ export type ListeningRecord = {
   totalSeconds: number;
   /** Last known duration in seconds (0 when unknown). */
   duration: number;
+  /** Display metadata, captured from playback (Phase 2; absent in v1 data). */
+  title?: string;
+  artist?: string;
   updatedAt: number;
 };
 
@@ -40,13 +63,28 @@ export type DownloadedTrack = {
   artist: string;
   albumImageUrl?: string;
   duration: number;
-  /** file:// URI of the local audio file. */
+  /** Absolute path of the saved file (ciphertext for Phase 2 saves). */
   filePath: string;
+  /** Size on disk in bytes (the encrypted size for Phase 2 saves). */
   fileSize: number;
   mimeType?: string;
   downloadedAt: number;
   /** Listening total at the moment the download completed. */
   listeningSeconds: number;
+  /** Phase 2 saves are AES-256-GCM encrypted; absent means a v1 plain save. */
+  encrypted?: boolean;
+  /** Encrypted file format version (1 = chunked AES-GCM). */
+  formatVersion?: number;
+};
+
+/** The most recent auto-download outcome, kept so failures are visible. */
+export type LastDownloadEvent = {
+  trackId: string;
+  title: string;
+  success: boolean;
+  /** Short human-readable reason when the attempt failed. */
+  reason?: string;
+  at: number;
 };
 
 /** A position jump larger than wall-clock + this is a seek, not listening. */
@@ -55,35 +93,6 @@ const SEEK_TOLERANCE_SECONDS = 2;
 const DOWNLOAD_TRIGGER_RATIO = 0.5;
 /** A failed download is not retried more often than this. */
 const RETRY_BACKOFF_MS = 60_000;
-
-const MIME_EXTENSIONS: Record<string, string> = {
-  'audio/mp4': 'm4a',
-  'audio/x-m4a': 'm4a',
-  'audio/mpeg': 'mp3',
-  'audio/mp3': 'mp3',
-  'audio/webm': 'webm',
-  'audio/ogg': 'ogg',
-  'audio/aac': 'aac',
-  'audio/flac': 'flac',
-  'audio/x-flac': 'flac',
-  'audio/wav': 'wav',
-  'audio/x-wav': 'wav',
-};
-
-function extensionFor(mimeType?: string): string {
-  if (mimeType) {
-    const clean = mimeType.split(';')[0].trim().toLowerCase();
-    if (MIME_EXTENSIONS[clean]) return MIME_EXTENSIONS[clean];
-    const subtype = clean.split('/')[1]?.replace(/[^a-z0-9]/g, '');
-    if (subtype && subtype.length <= 5) return subtype;
-  }
-  return 'm4a';
-}
-
-/** File names come from source ids; strip anything a filesystem would reject. */
-function safeFileBase(sourceId: string): string {
-  return sourceId.replace(/[^a-zA-Z0-9_-]/g, '_');
-}
 
 type PlaybackObservation = {
   isPlaying: boolean;
@@ -99,6 +108,7 @@ class DownloadServiceImpl {
   private downloading = new Set<string>();
   private lastFailedAt = new Map<string, number>();
   private completeListeners = new Set<(record: DownloadedTrack) => void>();
+  private lastEvent: LastDownloadEvent | null = null;
 
   private loadPromise: Promise<void> | null = null;
 
@@ -116,9 +126,10 @@ class DownloadServiceImpl {
   }
 
   private async performLoad(): Promise<void> {
-    const [listening, downloads] = await Promise.all([
+    const [listening, downloads, lastEvent] = await Promise.all([
       readJson<Record<string, ListeningRecord>>(STORAGE_KEYS.listening, {}),
       readJson<DownloadedTrack[]>(STORAGE_KEYS.downloads, []),
+      readJson<LastDownloadEvent | null>(STORAGE_KEYS.downloadEvent, null),
     ]);
 
     if (listening && typeof listening === 'object') {
@@ -126,14 +137,49 @@ class DownloadServiceImpl {
         if (v && typeof v.totalSeconds === 'number') this.listening.set(k, v);
       }
     }
+
+    let droppedLegacy = false;
     if (Array.isArray(downloads)) {
       for (const d of downloads) {
-        if (d?.trackId) this.downloads.set(d.trackId, d);
+        if (!d?.trackId) continue;
+        if (d.encrypted) {
+          this.downloads.set(d.trackId, d);
+        } else {
+          // Phase 1 saved plain audio files. Those are stale test data
+          // under the Phase 2 design: drop the record; the files are
+          // removed by cleanupLegacyPlainFiles() below. The song simply
+          // re-saves, encrypted, on its next qualifying listen.
+          droppedLegacy = true;
+        }
       }
+    }
+    if (droppedLegacy) this.persistDownloads();
+    this.cleanupLegacyPlainFiles();
+
+    if (lastEvent && typeof lastEvent.at === 'number') {
+      this.lastEvent = lastEvent;
     }
   }
 
-  // ---- read API for later phases ---------------------------------------
+  /**
+   * Delete plain audio left behind by Phase 1 from the downloads folder.
+   * Phase 2's `.esei` ciphertext files live in the same folder (Android's
+   * filesDir) and are deliberately left untouched.
+   */
+  private cleanupLegacyPlainFiles(): void {
+    try {
+      const dir = new Directory(Paths.document, 'esei-downloads');
+      if (!dir.exists) return;
+      for (const entry of dir.list()) {
+        if (entry instanceof Directory) continue;
+        if (!entry.name.endsWith('.esei')) entry.delete();
+      }
+    } catch {
+      // Cleanup is best-effort; a stuck file must never break startup.
+    }
+  }
+
+  // ---- read API -----------------------------------------------------------
 
   getListeningTotal(trackId: string): number {
     return this.listening.get(trackId)?.totalSeconds ?? 0;
@@ -141,6 +187,11 @@ class DownloadServiceImpl {
 
   getListeningRecords(): ListeningRecord[] {
     return [...this.listening.values()];
+  }
+
+  /** The most recent download attempt's outcome, or null if none yet. */
+  getLastDownloadEvent(): LastDownloadEvent | null {
+    return this.lastEvent;
   }
 
   isDownloaded(trackId: string): boolean {
@@ -165,12 +216,91 @@ class DownloadServiceImpl {
     return total;
   }
 
+  /**
+   * Tracks on their way to the download trigger: some listening logged,
+   * duration known, not yet saved. Sorted by progress so the closest to
+   * saving reads first. Powers the Offline section's progress list.
+   */
+  getInProgress(): { record: ListeningRecord; ratio: number }[] {
+    const out: { record: ListeningRecord; ratio: number }[] = [];
+    for (const record of this.listening.values()) {
+      if (this.downloads.has(record.trackId) || this.downloading.has(record.trackId)) {
+        continue;
+      }
+      if (record.duration <= 0 || record.totalSeconds <= 0) continue;
+      out.push({
+        record,
+        ratio: Math.min(1, record.totalSeconds / record.duration),
+      });
+    }
+    return out.sort((a, b) => b.ratio - a.ratio);
+  }
+
   /** Notified once per completed auto-download (drives the "saved" toast). */
   subscribeDownloadComplete(listener: (record: DownloadedTrack) => void): () => void {
     this.completeListeners.add(listener);
     return () => {
       this.completeListeners.delete(listener);
     };
+  }
+
+  // ---- offline playback -----------------------------------------------------
+
+  /** Rebuild the app's Track shape from a saved song's record. */
+  toTrack(record: DownloadedTrack): Track {
+    return {
+      id: record.trackId,
+      title: record.title,
+      artist: { id: `offline:${record.sourceId}`, name: record.artist },
+      albumImageUrl: record.albumImageUrl ?? '',
+      duration: record.duration || 0,
+      provider: 'youtube',
+      sourceId: record.sourceId,
+    };
+  }
+
+  /**
+   * A playable stream for a saved song: the native loopback URL that
+   * decrypts it on the fly. Null when the file is gone, in which case the
+   * stale record is dropped so the song can save again on a later listen.
+   */
+  async getOfflineStream(record: DownloadedTrack): Promise<ResolvedStream | null> {
+    const info = await offlineFileInfo(record.sourceId);
+    if (!info.exists) {
+      this.downloads.delete(record.trackId);
+      this.persistDownloads();
+      return null;
+    }
+    const url = await getOfflinePlaybackUrl(record.sourceId, record.mimeType);
+    if (!url) return null;
+    return {
+      url,
+      mimeType: record.mimeType,
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      resolvedBy: 'offline-encrypted',
+    };
+  }
+
+  // ---- delete ---------------------------------------------------------------
+
+  /** Remove a saved song: encrypted file first, then its record. */
+  async deleteDownload(record: DownloadedTrack): Promise<void> {
+    await deleteOfflineFile(record.sourceId);
+    this.downloads.delete(record.trackId);
+    this.persistDownloads();
+  }
+
+  // ---- persistence helpers ----------------------------------------------------
+
+  private persistDownloads(): void {
+    // Written immediately, not debounced: Phase 1's debounced write could
+    // be lost if the app was killed right after a download completed.
+    void writeJson(STORAGE_KEYS.downloads, [...this.downloads.values()]);
+  }
+
+  private recordEvent(event: LastDownloadEvent): void {
+    this.lastEvent = event;
+    void writeJson(STORAGE_KEYS.downloadEvent, event);
   }
 
   // ---- listening-time tracking ------------------------------------------
@@ -218,6 +348,8 @@ class DownloadServiceImpl {
       trackId: track.id,
       totalSeconds: total,
       duration: duration || existing?.duration || 0,
+      title: track.title,
+      artist: track.artist.name,
       updatedAt: now,
     });
     writeJsonDebounced(
@@ -234,9 +366,9 @@ class DownloadServiceImpl {
   // ---- auto-download -----------------------------------------------------
 
   /**
-   * Download a track's audio to the app's document directory, once. Safe to
-   * call on every tick past the trigger: downloaded/downloading tracks and a
-   * post-failure backoff make repeat calls cheap no-ops.
+   * Save a track's audio, encrypted, once. Safe to call on every tick past
+   * the trigger: downloaded/downloading tracks and a post-failure backoff
+   * make repeat calls cheap no-ops.
    */
   async maybeDownload(track: Track): Promise<void> {
     await this.load();
@@ -253,18 +385,14 @@ class DownloadServiceImpl {
       MusicService.invalidateStream(track);
       const stream = await MusicService.resolveStream(track);
 
-      const dir = this.downloadsDirectory();
-      const destination = new File(
-        dir,
-        `${safeFileBase(track.sourceId)}.${extensionFor(stream.mimeType)}`
+      // Native code streams the bytes through the encryptor: the only file
+      // this creates is ciphertext, in app-private storage.
+      const result = await downloadAndEncryptStream(
+        stream.url,
+        stream.headers ?? {},
+        track.sourceId
       );
-      // A partial file from an earlier interrupted attempt must not be
-      // mistaken for (or appended to) the real download.
-      if (destination.exists) destination.delete();
-
-      const file = await File.downloadFileAsync(stream.url, destination, {
-        headers: stream.headers,
-      });
+      if (!result.ok) throw new Error(result.message);
 
       const record: DownloadedTrack = {
         trackId: track.id,
@@ -273,34 +401,44 @@ class DownloadServiceImpl {
         artist: track.artist.name,
         albumImageUrl: track.albumImageUrl || undefined,
         duration: track.duration || 0,
-        filePath: file.uri,
-        fileSize: file.size,
+        filePath: result.path,
+        fileSize: result.fileSize,
         mimeType: stream.mimeType,
         downloadedAt: Date.now(),
         listeningSeconds: this.getListeningTotal(track.id),
+        encrypted: true,
+        formatVersion: 1,
       };
 
       this.downloads.set(track.id, record);
-      writeJsonDebounced(STORAGE_KEYS.downloads, [...this.downloads.values()], 400);
+      this.persistDownloads();
+      this.recordEvent({
+        trackId: track.id,
+        title: track.title,
+        success: true,
+        at: Date.now(),
+      });
 
       if (__DEV__) {
-        console.log('[downloads] saved', record.title, record.fileSize, 'bytes');
+        console.log('[downloads] saved (encrypted)', record.title, record.fileSize, 'bytes');
       }
       for (const listener of this.completeListeners) listener(record);
     } catch (e) {
       this.lastFailedAt.set(track.id, Date.now());
+      // Failures are no longer silent (Phase 1's were): the Offline section
+      // shows this event until a later attempt replaces it. The trigger
+      // stays true, so a later tick retries after the backoff.
+      this.recordEvent({
+        trackId: track.id,
+        title: track.title,
+        success: false,
+        reason: e instanceof Error ? e.message : String(e),
+        at: Date.now(),
+      });
       if (__DEV__) console.log('[downloads] failed', track.title, e);
-      // Silent by design: auto-download is a background convenience, and the
-      // trigger stays true, so a later tick retries after the backoff.
     } finally {
       this.downloading.delete(track.id);
     }
-  }
-
-  private downloadsDirectory(): Directory {
-    const dir = new Directory(Paths.document, 'esei-downloads');
-    if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
-    return dir;
   }
 }
 

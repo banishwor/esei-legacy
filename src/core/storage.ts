@@ -90,4 +90,6 @@ export const STORAGE_KEYS = {
   listening: 'listening',
   /** Completed auto-downloads and their local files (Phase 1). */
   downloads: 'downloads',
+  /** Most recent auto-download outcome, success or failure (Phase 2). */
+  downloadEvent: 'download-event',
 } as const;

@@ -61,6 +61,53 @@ class NoteNativeModule : Module() {
     AsyncFunction("resolveYouTubeStream") { videoId: String ->
       resolveYouTubeStream(videoId)
     }
+
+    // Phase 2: encrypted offline storage. Like resolution, every failure
+    // comes back as a structured `{ ok: false, message }` value.
+    AsyncFunction("downloadAndEncrypt") { url: String, headers: Map<String, String>, sourceId: String ->
+      downloadAndEncrypt(url, headers, sourceId)
+    }
+
+    AsyncFunction("getOfflinePlaybackUrl") { sourceId: String, mimeType: String? ->
+      store().playbackUrl(sourceId, mimeType)
+    }
+
+    AsyncFunction("deleteOfflineFile") { sourceId: String ->
+      store().delete(sourceId)
+    }
+
+    AsyncFunction("offlineFileInfo") { sourceId: String ->
+      val (exists, size) = store().fileInfo(sourceId)
+      mapOf("exists" to exists, "size" to size)
+    }
+  }
+
+  private fun store(): EncryptedStore {
+    val context = appContext.reactContext?.applicationContext
+      ?: appContext.currentActivity?.applicationContext
+      ?: throw IllegalStateException("No application context available")
+    return EncryptedStore.get(context)
+  }
+
+  private fun downloadAndEncrypt(
+    url: String,
+    headers: Map<String, String>,
+    sourceId: String
+  ): Map<String, Any?> {
+    return try {
+      val (path, fileSize, plainSize) = store().downloadAndEncrypt(url, headers, sourceId)
+      mapOf(
+        "ok" to true,
+        "path" to path,
+        "fileSize" to fileSize,
+        "plainSize" to plainSize
+      )
+    } catch (e: Throwable) {
+      mapOf(
+        "ok" to false,
+        "message" to (e.message ?: e.javaClass.simpleName)
+      )
+    }
   }
 
   private fun ensureInitialized() {

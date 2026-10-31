@@ -58,3 +58,21 @@ export type NativeStreamFailure = {
  * of these, so an extraction failure cannot take down the RN runtime.
  */
 export type NativeStreamResult = NativeStreamSuccess | NativeStreamFailure;
+
+/**
+ * Result of `NoteNative.downloadAndEncrypt` (Phase 2 offline storage).
+ *
+ * On success the audio lives at `path` as AES-256-GCM ciphertext -- never as
+ * a playable file. `fileSize` is the encrypted size on disk; `plainSize` is
+ * the audio's real byte count.
+ */
+export type EncryptedDownloadResult =
+  | { ok: true; path: string; fileSize: number; plainSize: number }
+  | { ok: false; message: string };
+
+/** Whether a saved (encrypted) file is present, and its size on disk. */
+export type OfflineFileInfo = {
+  exists: boolean;
+  /** Encrypted size in bytes; 0 when absent. */
+  size: number;
+};

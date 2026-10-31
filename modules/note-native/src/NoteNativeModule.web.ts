@@ -1,6 +1,11 @@
 import { registerWebModule, NativeModule } from 'expo';
 
-import { NativeStreamResult, PlatformInfo } from './NoteNative.types';
+import {
+  EncryptedDownloadResult,
+  NativeStreamResult,
+  OfflineFileInfo,
+  PlatformInfo,
+} from './NoteNative.types';
 
 class NoteNativeModule extends NativeModule<{}> {
   getPlatformInfo(): PlatformInfo {
@@ -14,6 +19,26 @@ class NoteNativeModule extends NativeModule<{}> {
       reason: 'module_unavailable',
       message: 'Native stream resolution is not available on web',
     };
+  }
+
+  /** Encrypted offline storage is Android-only. */
+  async downloadAndEncrypt(): Promise<EncryptedDownloadResult> {
+    return {
+      ok: false,
+      message: 'Encrypted offline storage is not available on web',
+    };
+  }
+
+  async getOfflinePlaybackUrl(): Promise<string | null> {
+    return null;
+  }
+
+  async deleteOfflineFile(): Promise<boolean> {
+    return false;
+  }
+
+  async offlineFileInfo(): Promise<OfflineFileInfo> {
+    return { exists: false, size: 0 };
   }
 }
 

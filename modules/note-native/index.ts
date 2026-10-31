@@ -1,5 +1,10 @@
 import NoteNativeModule from './src/NoteNativeModule';
-import { NativeStreamResult, PlatformInfo } from './src/NoteNative.types';
+import {
+  EncryptedDownloadResult,
+  NativeStreamResult,
+  OfflineFileInfo,
+  PlatformInfo,
+} from './src/NoteNative.types';
 
 export * from './src/NoteNative.types';
 export { default as NoteNativeModule } from './src/NoteNativeModule';
@@ -46,5 +51,72 @@ export async function resolveYouTubeStream(
       reason: 'unknown',
       message: e instanceof Error ? e.message : String(e),
     };
+  }
+}
+
+/**
+ * Download a stream straight into encrypted storage (Phase 2).
+ *
+ * The URL is fetched by native code and written as AES-256-GCM ciphertext;
+ * no plain audio file ever exists. Never throws.
+ */
+export async function downloadAndEncryptStream(
+  url: string,
+  headers: Record<string, string>,
+  sourceId: string
+): Promise<EncryptedDownloadResult> {
+  const module = NoteNativeModule;
+  if (!module) {
+    return { ok: false, message: 'NoteNative is not present in this binary' };
+  }
+  try {
+    return await module.downloadAndEncrypt(url, headers, sourceId);
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+/**
+ * The loopback URL the player loads to hear a saved song, or null when the
+ * song is not saved. The URL only works from inside this app, in this
+ * process, with this session's token.
+ */
+export async function getOfflinePlaybackUrl(
+  sourceId: string,
+  mimeType?: string
+): Promise<string | null> {
+  const module = NoteNativeModule;
+  if (!module) return null;
+  try {
+    return await module.getOfflinePlaybackUrl(sourceId, mimeType ?? null);
+  } catch {
+    return null;
+  }
+}
+
+/** Remove a saved song's encrypted file. Returns false when it was absent. */
+export async function deleteOfflineFile(sourceId: string): Promise<boolean> {
+  const module = NoteNativeModule;
+  if (!module) return false;
+  try {
+    return await module.deleteOfflineFile(sourceId);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a saved song's encrypted file is on disk, and its size. */
+export async function offlineFileInfo(
+  sourceId: string
+): Promise<OfflineFileInfo> {
+  const module = NoteNativeModule;
+  if (!module) return { exists: false, size: 0 };
+  try {
+    return await module.offlineFileInfo(sourceId);
+  } catch {
+    return { exists: false, size: 0 };
   }
 }

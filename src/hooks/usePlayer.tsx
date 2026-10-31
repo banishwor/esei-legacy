@@ -10,13 +10,16 @@ import React, {
 } from 'react';
 import { AppState, Platform, ToastAndroid } from 'react-native';
 import { AppError, messageFor, toAppError } from '../core/errors';
-import { RepeatMode, Track } from '../core/types';
+import { RepeatMode, ResolvedStream, Track } from '../core/types';
 import { flushWrites, readJson, writeJsonDebounced, STORAGE_KEYS } from '../core/storage';
 import { playbackEngine, IDLE_STATUS, PlaybackStatus } from '../playback/PlaybackEngine';
 import { Queue, QueueSnapshot, EMPTY_QUEUE } from '../playback/queue';
 import { preloader } from '../playback/preload';
 import { endpointSource } from '../providers/stream/StreamResolver';
-import { DownloadService } from '../services/DownloadService';
+import {
+  DownloadService,
+  DownloadedTrack,
+} from '../services/DownloadService';
 import { LibraryService } from '../services/LibraryService';
 import { MusicService } from '../services/MusicService';
 
@@ -25,6 +28,8 @@ type PlayerContextType = {
   currentTrack: Track | null;
   isPlaying: boolean;
   playTrack: (track: Track, context?: { tracks?: Track[]; label?: string }) => void;
+  /** Play a saved (encrypted) song from its local file -- no network. */
+  playOffline: (record: DownloadedTrack) => void;
   togglePlayPause: () => void;
 
   // --- everything the real player adds ---
@@ -119,6 +124,13 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   /** Which track the in-flight load belongs to, so we never abort our own. */
   const loadingTrackId = useRef<string | null>(null);
   /**
+   * A one-shot stream override for the next load of a specific track, set by
+   * playOffline: the saved song's loopback URL, so loadCurrent plays the
+   * local encrypted file instead of resolving a network stream. Consumed by
+   * the first load that matches; a load for any other track leaves it be.
+   */
+  const forcedStream = useRef<{ trackId: string; stream: ResolvedStream } | null>(null);
+  /**
    * Consecutive tracks auto-skipped because they would not play. Bounded so a
    * queue full of dead videos stops instead of racing to the end.
    */
@@ -177,7 +189,16 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       lastAttempt.current = { track, position: options.startPosition ?? 0 };
 
       try {
-        const stream = await MusicService.resolveStream(track, controller.signal);
+        // An explicit offline play (Offline section) hands us its stream;
+        // anything else resolves over the network as usual. Phase 3 will
+        // decide when normal plays should also prefer the local file.
+        let stream: ResolvedStream;
+        if (forcedStream.current?.trackId === track.id) {
+          stream = forcedStream.current.stream;
+          forcedStream.current = null;
+        } else {
+          stream = await MusicService.resolveStream(track, controller.signal);
+        }
         if (id !== loadId.current) return; // superseded by a newer load
 
         await playbackEngine.load(track, stream, options);
@@ -347,7 +368,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     DownloadService.observe(currentTrack, status, loadId.current);
   }, [currentTrack, status]);
 
-  // The one visible Phase 1 signal: a toast when an auto-download lands.
+  // A toast when an auto-download lands. Phase 1 taught us a toast alone
+  // is easy to miss (it never shows with the screen off), so Phase 2 also
+  // persists every outcome -- see DownloadService's last download event,
+  // which the Offline section displays.
   useEffect(
     () =>
       DownloadService.subscribeDownloadComplete((record) => {
@@ -422,6 +446,32 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       persistQueue();
 
       void loadCurrent({ autoPlay: true });
+    },
+    [bumpQueue, loadCurrent, persistQueue]
+  );
+
+  /**
+   * Play a saved song from its encrypted local file.
+   *
+   * The queue becomes just this song: what plays next after an offline play
+   * is Phase 3's storage-first question, and quietly falling back to the
+   * network here would defeat the point of an offline play.
+   */
+  const playOffline = useCallback(
+    (record: DownloadedTrack) => {
+      void (async () => {
+        const stream = await DownloadService.getOfflineStream(record);
+        if (!stream) {
+          setError('That saved song is no longer on this phone.');
+          return;
+        }
+        const track = DownloadService.toTrack(record);
+        forcedStream.current = { trackId: track.id, stream };
+        queueRef.current.setTracks([track], 0, 'Offline');
+        bumpQueue();
+        persistQueue();
+        void loadCurrent({ autoPlay: true });
+      })();
     },
     [bumpQueue, loadCurrent, persistQueue]
   );
@@ -620,6 +670,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       currentTrack,
       isPlaying: status.isPlaying,
       playTrack,
+      playOffline,
       togglePlayPause,
 
       isLoading,
@@ -662,6 +713,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       status.isPlaying,
       status.isBuffering,
       playTrack,
+      playOffline,
       togglePlayPause,
       isLoading,
       error,

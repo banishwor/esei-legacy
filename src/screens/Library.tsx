@@ -16,6 +16,7 @@ import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { Pill } from '../components/common/Pill';
 import { GlassCard } from '../components/common/GlassCard';
 import { TrackRow } from '../components/lists/TrackRow';
+import { OfflineSection } from '../components/offline/OfflineSection';
 import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
 import { Playlist, Track } from '../core/types';
@@ -29,7 +30,7 @@ type LibraryStackParams = {
   NowPlaying: undefined;
 };
 
-const FILTERS = ['Playlists', 'Artists', 'Albums', 'Downloaded'];
+const FILTERS = ['Playlists', 'Artists', 'Albums', 'Offline'];
 
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
@@ -302,11 +303,7 @@ export default function LibraryScreen() {
               <Text style={styles.emptyHint}>Albums appear here as you save music.</Text>
             ))}
 
-          {activeFilter === 'Downloaded' && (
-            <Text style={styles.emptyHint}>
-              Esei streams on demand and doesn't store audio offline.
-            </Text>
-          )}
+          {activeFilter === 'Offline' && <OfflineSection />}
         </View>
       </ScrollView>
 
