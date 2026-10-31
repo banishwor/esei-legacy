@@ -35,6 +35,12 @@ type PlayerContextType = {
   currentTrack: Track | null;
   isPlaying: boolean;
   playTrack: (track: Track, context?: { tracks?: Track[]; label?: string }) => void;
+  /**
+   * Start a radio station from one song: play it as a fresh queue, then
+   * seed the queue with its related tracks right away (and keep topping
+   * up, per the autoplay-related setting).
+   */
+  startRadio: (track: Track) => void;
   /** Play a saved (encrypted) song from its local file -- no network. */
   playOffline: (record: DownloadedTrack) => void;
   togglePlayPause: () => void;
@@ -695,6 +701,31 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   );
 
   /**
+   * Start Radio: the seed song as a one-track queue labelled "Radio",
+   * with the first related batch fetched immediately.
+   *
+   * The explicit append (rather than waiting for the queue to run low)
+   * is what makes this a station rather than a single play: the batch is
+   * requested now, through the same serialized extension chain every
+   * top-up uses, and Queue.add de-duplicates, so it cannot double up
+   * with the low-queue top-up loadCurrent fires for the seed. With
+   * autoplay-related off in Settings the extension no-ops inside
+   * runExtension and Radio stays just the seed song, as the user chose.
+   */
+  const startRadio = useCallback(
+    (track: Track) => {
+      disarmSleepAtTrackEnd();
+      queueRef.current.setTracks([track], 0, 'Radio');
+      bumpQueue();
+      persistQueue();
+
+      void loadCurrent({ autoPlay: true });
+      void extendWithRelated('append');
+    },
+    [bumpQueue, extendWithRelated, loadCurrent, persistQueue]
+  );
+
+  /**
    * Play a saved song from its encrypted local file.
    *
    * The queue becomes just this song — an explicit offline play means
@@ -917,6 +948,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       currentTrack,
       isPlaying: status.isPlaying,
       playTrack,
+      startRadio,
       playOffline,
       togglePlayPause,
 
@@ -963,6 +995,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       status.isPlaying,
       status.isBuffering,
       playTrack,
+      startRadio,
       playOffline,
       togglePlayPause,
       isLoading,

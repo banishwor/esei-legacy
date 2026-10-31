@@ -10,10 +10,11 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Check, Heart, ListMusic, Plus, X } from 'lucide-react-native';
+import { Check, Heart, ListMusic, Plus, Radio, X } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../../constants/theme';
 import { Track } from '../../core/types';
 import { useLibrary } from '../../hooks/useLibrary';
+import { usePlayer } from '../../hooks/usePlayer';
 
 type Props = {
   /** The track being filed. Null closes the sheet. */
@@ -38,6 +39,7 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
     toggleLike,
     isLiked,
   } = useLibrary();
+  const { startRadio } = usePlayer();
 
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -86,6 +88,13 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
     [track, addToPlaylist, removeFromPlaylist]
   );
 
+  /** Radio replaces the queue, so the sheet's job is done: close behind it. */
+  const startRadioAndClose = useCallback(() => {
+    if (!track) return;
+    startRadio(track);
+    close();
+  }, [track, startRadio, close]);
+
   const createAndAdd = useCallback(() => {
     const name = newName.trim();
     if (!name || !track) return;
@@ -130,6 +139,24 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
             <X color={COLORS.text.secondary} size={22} />
           </TouchableOpacity>
         </View>
+
+        {/* This sheet is the track menu on every surface (Search, Home,
+            History, playlists, Now Playing), so Radio lives here too. */}
+        <TouchableOpacity
+          style={styles.row}
+          activeOpacity={0.7}
+          onPress={startRadioAndClose}
+        >
+          <View style={styles.rowIcon}>
+            <Radio color={COLORS.text.primary} size={20} />
+          </View>
+          <View style={styles.rowTextWrap}>
+            <Text style={styles.rowLabel}>Start Radio</Text>
+            <Text style={styles.rowMeta}>
+              Play this song, then keep going with related songs
+            </Text>
+          </View>
+        </TouchableOpacity>
 
         {creating ? (
           <View style={styles.createRow}>

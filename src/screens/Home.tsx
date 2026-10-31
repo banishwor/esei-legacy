@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Search, Play, Heart, Compass, Moon, Target, User } from 'lucide-react-native';
+import { Search, Play, Heart, Compass, Moon, Target, User, Flame, History, Download } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { Pill } from '../components/common/Pill';
 import { GlassCard } from '../components/common/GlassCard';
@@ -23,6 +23,7 @@ import { useOnline } from '../hooks/useOnline';
 import { ConnectivityService } from '../services/ConnectivityService';
 import { DownloadService, DownloadedTrack } from '../services/DownloadService';
 import { MusicService } from '../services/MusicService';
+import { MixService, Mix, MixId } from '../services/MixService';
 import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -40,6 +41,14 @@ const ACTIONS = [
 const greetingFor = (hour: number) =>
   hour < 12 ? 'Good morning,' : hour < 18 ? 'Good afternoon,' : 'Good evening,';
 
+/** Card icon per mix, shown when a mix has no cover art to borrow. */
+const MIX_ICONS: Record<MixId, typeof Heart> = {
+  'most-played': Flame,
+  'liked-mix': Heart,
+  'forgotten-favourites': History,
+  'recently-saved': Download,
+};
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
@@ -56,6 +65,11 @@ export default function HomeScreen() {
   const online = useOnline();
   const [savedSongs, setSavedSongs] = useState<DownloadedTrack[]>([]);
 
+  // Phase 3.2: Your Mixes are computed from local stores only, so the
+  // same cards appear online and offline. Rebuilt on every focus, like
+  // the saved list above -- a mix should never be staler than the screen.
+  const [mixes, setMixes] = useState<Mix[]>([]);
+
   useFocusEffect(
     useCallback(() => {
       ConnectivityService.check();
@@ -63,11 +77,29 @@ export default function HomeScreen() {
       (async () => {
         await DownloadService.load();
         if (live) setSavedSongs(DownloadService.getDownloads());
+        const built = await MixService.buildMixes();
+        if (live) setMixes(built);
       })();
       return () => {
         live = false;
       };
     }, [])
+  );
+
+  /** Play a mix card: ranked mixes in order, the rest shuffled. */
+  const playMix = useCallback(
+    (mix: Mix) => {
+      if (!mix.tracks.length) return;
+      const tracks = mix.shuffleOnPlay ? [...mix.tracks] : mix.tracks;
+      if (mix.shuffleOnPlay) {
+        for (let i = tracks.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [tracks[i], tracks[j]] = [tracks[j], tracks[i]];
+        }
+      }
+      playTrack(tracks[0], { tracks, label: mix.title });
+    },
+    [playTrack]
   );
 
   /** Play within the saved list, so next/previous stay offline too. */
@@ -165,6 +197,48 @@ export default function HomeScreen() {
   /** Track whose "add to playlist" sheet is open. */
   const [addingTrack, setAddingTrack] = useState<Track | null>(null);
 
+  // One section element, dropped into both the online and offline
+  // branches below: the mixes are local, so they belong on both.
+  const mixesSection = mixes.length > 0 ? (
+    <>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Your Mixes</Text>
+      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.mixesRow}
+      >
+        {mixes.map((mix) => {
+          const MixIcon = MIX_ICONS[mix.id];
+          const cover = mix.tracks[0]?.albumImageUrl;
+          return (
+            <TouchableOpacity
+              key={mix.id}
+              style={styles.mixCard}
+              activeOpacity={0.8}
+              onPress={() => playMix(mix)}
+            >
+              {cover ? (
+                <Image source={{ uri: cover }} style={styles.mixCover} />
+              ) : (
+                <View style={[styles.mixCover, styles.mixCoverFallback]}>
+                  <MixIcon color={COLORS.text.secondary} size={28} />
+                </View>
+              )}
+              <Text style={styles.mixTitle} numberOfLines={1}>
+                {mix.title}
+              </Text>
+              <Text style={styles.mixMeta}>
+                {mix.tracks.length} {mix.tracks.length === 1 ? 'song' : 'songs'}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </>
+  ) : null;
+
   return (
     <View style={styles.container}>
       {/* Pinned: greeting + search stay put while the rest of the page scrolls. */}
@@ -211,6 +285,8 @@ export default function HomeScreen() {
                 phone. They play without a connection.
               </Text>
             </GlassCard>
+
+            {mixesSection}
 
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Saved songs</Text>
@@ -293,6 +369,8 @@ export default function HomeScreen() {
             </TouchableOpacity>
           ))}
         </View>
+
+        {mixesSection}
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>
@@ -487,6 +565,39 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     marginBottom: SIZES.xl,
+  },
+  mixesRow: {
+    marginBottom: SIZES.xl,
+    // Cards sit inside the padded scroll content; bleed the row to the
+    // screen edge so the last card can scroll fully into view.
+    marginHorizontal: -SIZES.md,
+    paddingHorizontal: SIZES.md,
+  },
+  mixCard: {
+    width: 132,
+    marginRight: SIZES.md,
+  },
+  mixCover: {
+    width: 132,
+    height: 132,
+    borderRadius: SIZES.radius.md,
+    backgroundColor: COLORS.surfaceLight,
+    marginBottom: SIZES.sm,
+  },
+  mixCoverFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mixTitle: {
+    fontFamily: FONTS.medium,
+    fontSize: 14,
+    color: COLORS.text.primary,
+  },
+  mixMeta: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    marginTop: 2,
   },
   emptyCard: {
     padding: SIZES.md,
