@@ -8,7 +8,7 @@ import React, {
   useState,
   ReactNode,
 } from 'react';
-import { AppState, Platform } from 'react-native';
+import { AppState, Platform, ToastAndroid } from 'react-native';
 import { AppError, messageFor, toAppError } from '../core/errors';
 import { RepeatMode, Track } from '../core/types';
 import { flushWrites, readJson, writeJsonDebounced, STORAGE_KEYS } from '../core/storage';
@@ -16,6 +16,7 @@ import { playbackEngine, IDLE_STATUS, PlaybackStatus } from '../playback/Playbac
 import { Queue, QueueSnapshot, EMPTY_QUEUE } from '../playback/queue';
 import { preloader } from '../playback/preload';
 import { endpointSource } from '../providers/stream/StreamResolver';
+import { DownloadService } from '../services/DownloadService';
 import { LibraryService } from '../services/LibraryService';
 import { MusicService } from '../services/MusicService';
 
@@ -291,7 +292,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     (async () => {
       try {
-        await Promise.all([MusicService.init(), LibraryService.load()]);
+        await Promise.all([MusicService.init(), LibraryService.load(), DownloadService.load()]);
         if (cancelled) return;
 
         const settings = LibraryService.getSettings();
@@ -334,6 +335,28 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ---- Phase 1: listening time + auto-download --------------------------
+
+  // Every status tick feeds the listening tracker. It counts only real
+  // played time (seeks are discarded there) and starts a background
+  // download once a track's accumulated listening reaches half its length.
+  // The load id identifies one play, which is what the per-play cap keys on.
+  useEffect(() => {
+    if (!currentTrack || !status.isLoaded) return;
+    DownloadService.observe(currentTrack, status, loadId.current);
+  }, [currentTrack, status]);
+
+  // The one visible Phase 1 signal: a toast when an auto-download lands.
+  useEffect(
+    () =>
+      DownloadService.subscribeDownloadComplete((record) => {
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(`Saved for offline: ${record.title}`, ToastAndroid.LONG);
+        }
+      }),
+    []
+  );
 
   // ---- persist playback position ---------------------------------------
 

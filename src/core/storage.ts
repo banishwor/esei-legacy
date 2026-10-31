@@ -86,4 +86,8 @@ export const STORAGE_KEYS = {
   searchHistory: 'search-history',
   cache: 'cache',
   history: 'history',
+  /** Per-track accumulated listening time (Phase 1 auto-download). */
+  listening: 'listening',
+  /** Completed auto-downloads and their local files (Phase 1). */
+  downloads: 'downloads',
 } as const;
