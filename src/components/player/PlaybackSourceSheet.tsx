@@ -24,7 +24,7 @@ const KINDS: EndpointKind[] = ['invidious', 'piped', 'custom'];
  *
  * Discovery (search, playlists, metadata) works out of the box. Actually
  * streaming audio goes through whichever authorized endpoint the user points
- * NØTE at -- their own, or one they are permitted to use -- which is why this
+ * Esei at -- their own, or one they are permitted to use -- which is why this
  * is configured here rather than shipped with a hard-coded server.
  */
 export const PlaybackSourceSheet: React.FC<{ visible: boolean; onClose: () => void }> = ({

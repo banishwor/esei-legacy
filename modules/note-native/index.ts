@@ -4,7 +4,7 @@ import { NativeStreamResult, PlatformInfo } from './src/NoteNative.types';
 export * from './src/NoteNative.types';
 export { default as NoteNativeModule } from './src/NoteNativeModule';
 
-/** True when this binary actually contains the NØTE native module. */
+/** True when this binary actually contains the Esei native module. */
 export function isNoteNativeAvailable(): boolean {
   return NoteNativeModule != null;
 }

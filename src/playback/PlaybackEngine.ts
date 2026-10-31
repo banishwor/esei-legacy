@@ -281,7 +281,7 @@ export class PlaybackEngine {
   /**
    * Native lock-screen / notification controls.
    *
-   * expo-audio owns the single MediaSession; NØTE must not create a second
+   * expo-audio owns the single MediaSession; Esei must not create a second
    * one. Play/pause, the scrub bar and seek +/-10s act directly on this same
    * player, so the engine stays the one source of truth.
    *

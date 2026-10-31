@@ -1,5 +1,5 @@
 /**
- * Canonical domain model for NØTE.
+ * Canonical domain model for Esei.
  *
  * Every provider normalizes into these shapes, so nothing above the
  * ProviderAdapter layer ever sees provider-specific data.

@@ -31,7 +31,7 @@ const NEWPIPE_URL = 'https://github.com/TeamNewPipe/NewPipeExtractor';
 /**
  * Settings, profile and the legal notices.
  *
- * NØTE is GPL-3.0-or-later because it links the NewPipe Extractor, and that
+ * Esei is GPL-3.0-or-later because it links the NewPipe Extractor, and that
  * licence expects the terms and the upstream attribution to be discoverable
  * from the app itself rather than only in the repository. This screen is where
  * they live.
@@ -150,9 +150,11 @@ export default function SettingsScreen() {
         {/* ---- Legal ---- */}
         <Text style={styles.sectionLabel}>LICENCE</Text>
         <View style={styles.card}>
-          <Text style={styles.legalTitle}>NØTE</Text>
+          <Text style={styles.legalTitle}>Esei</Text>
           <Text style={styles.legalBody}>
-            Copyright © 2026 Sanyam Jain.{'\n\n'}
+            Esei is a fork of NØTE.{'\n'}
+            Copyright © 2026 Banishwor Athokpam (Esei changes) and © 2026 Sanyam
+            Jain (original NØTE).{'\n\n'}
             This program is free software: you can redistribute it and/or modify it
             under the terms of the GNU General Public License as published by the
             Free Software Foundation, either version 3 of the License, or (at your

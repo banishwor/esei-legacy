@@ -49,7 +49,7 @@ function expiryFor(url: string): number {
   return expiresAt > Date.now() ? Math.min(expiresAt, fallback) : fallback;
 }
 
-/** Map the native failure taxonomy onto NØTE's existing AppError kinds. */
+/** Map the native failure taxonomy onto Esei's existing AppError kinds. */
 function toAppErrorFor(reason: NativeStreamFailureReason, message: string): AppError {
   switch (reason) {
     case 'geo_restricted':

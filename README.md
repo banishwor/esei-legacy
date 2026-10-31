@@ -1,46 +1,37 @@
 <div align="center">
 
-# NØTE
+# Esei
 
-**A music player for Android. Search, queue, and play — with the screen off.**
+**A music player for Android. Search, queue, and play — with the screen off. Songs you really listen to are saved on your phone automatically.**
 
 No account. No ads. No backend. No tracking.
 
 [![License: GPL v3 or later](https://img.shields.io/badge/License-GPLv3%2B-blue.svg)](LICENSE)
 [![Platform: Android](https://img.shields.io/badge/Platform-Android-3DDC84.svg)](#download)
-[![Release](https://img.shields.io/github/v/release/SJbuilds04/NOTE?include_prereleases)](https://github.com/SJbuilds04/NOTE/releases/latest)
+[![Release](https://img.shields.io/github/v/release/banishwor/esei?include_prereleases)](https://github.com/banishwor/esei/releases)
 
 </div>
 
 ---
 
-<div align="center">
-
-<a href="https://github.com/SJbuilds04/NOTE/releases/latest">
-  <img src="docs/preview.jpg" alt="NØTE — search, queue, and play with the screen off" width="820">
-</a>
-
-<!-- To replace this still with the inline showcase video:
-     1. Open any GitHub issue or comment box on this repo
-     2. Drag brag.mp4 into it -- GitHub uploads it and gives you a URL like
-        https://github.com/user-attachments/assets/<uuid>
-     3. Delete the <a>...</a> block above and paste that bare URL on its own
-        line here. GitHub renders it as an inline video player.
-     Do NOT commit the mp4 itself -- it bundles a third-party music track. -->
-
-</div>
+Esei is developed by **Banishwor Athokpam** ([banishwor.github.io](https://banishwor.github.io)) and is a fork of **[NØTE](https://github.com/SJbuilds04/NOTE)** by **Sanyam Jain**. The original copyright and the GPL licence are preserved — see [Legal](#legal) below.
 
 ---
 
 ## What it is
 
-NØTE is a free, open-source music player. You search for a song, tap it, and it plays —
+Esei is a free, open-source music player. You search for a song, tap it, and it plays —
 including in the background, with the screen locked, using your phone's normal lock-screen
 media controls.
 
-Everything you build up — liked songs, playlists, history, queue — is stored **on your
-device only**. There is no NØTE account, no NØTE server, and nothing is sent anywhere
-except the requests needed to search for and stream the audio you asked for.
+What Esei adds on top of the original app: **when you have actually listened to half of a
+song, Esei saves that song to your phone's storage automatically.** Listening is measured
+by real playing time — skipping or scrubbing forward does not count. Your listening time
+for every song is remembered, so half a song today and half tomorrow also adds up.
+
+Everything you build up — liked songs, playlists, history, queue, and your saved songs — is
+stored **on your device only**. There is no Esei account, no Esei server, and nothing is
+sent anywhere except the requests needed to search for and stream the audio you asked for.
 
 ## Features
 
@@ -52,34 +43,36 @@ except the requests needed to search for and stream the audio you asked for.
 - **History** — what you played, when
 - **Resumes where you left off** — queue and playback position survive a restart
 - **A real seek bar** — drag to scrub, not a decoration
+- **Automatic saving (Esei)** — a song is saved to your phone once your real listening
+  time reaches half of it, and a "Saved for offline" notice tells you when it happens
 
 ## Download
 
-Grab the signed APK from the **[latest release](https://github.com/SJbuilds04/NOTE/releases/latest)**:
+Grab the signed APK from the **[releases page](https://github.com/banishwor/esei/releases)**:
 
-**[⬇ Download NOTE-v1.0.0.apk](https://github.com/SJbuilds04/NOTE/releases/latest/download/NOTE-v1.0.0.apk)**
+**[⬇ Download Esei-Phase1.apk](https://github.com/banishwor/esei/releases/download/v1.0.0-phase1/Esei-Phase1.apk)** (latest build)
 
 Verify it before installing:
 
 ```
-SHA-256  ca911b5a49ead0f3129a1748a575fb8c5b746ccd6ed035c42441283ac536ee52
+SHA-256  d054af14a31800b7f17172c11fa1fa66f73e067ee6ada3847894cb3735ac2e2e
 ```
 
 ```bash
 # Linux / macOS
-sha256sum NOTE-v1.0.0.apk
+sha256sum Esei-Phase1.apk
 
 # Windows (PowerShell)
-Get-FileHash NOTE-v1.0.0.apk -Algorithm SHA256
+Get-FileHash Esei-Phase1.apk -Algorithm SHA256
 ```
 
-NØTE is **not distributed through Google Play**, so you install it by sideloading. Android
+Esei is **not distributed through Google Play**, so you install it by sideloading. Android
 will warn you about installing from an unknown source — that warning is expected for any
 APK obtained outside the Play Store. Only install a build whose checksum matches the one
 published above, or one you compiled yourself from this repository.
 
-Requires Android 7.0 or newer. The release APK is signed with the project's own key; it is
-not affiliated with, reviewed by, or distributed by Google.
+Requires Android 7.0 or newer. The release APK is signed with the maintainer's own key;
+it is not affiliated with, reviewed by, or distributed by Google.
 
 ## Build from source
 
@@ -94,8 +87,8 @@ You do not have to trust the published APK — you can build your own.
 **Steps**
 
 ```bash
-git clone https://github.com/SJbuilds04/NOTE.git
-cd NOTE
+git clone https://github.com/banishwor/esei.git
+cd esei
 npm install
 
 # Generate the native Android project (android/ is not committed)
@@ -134,17 +127,18 @@ methods — nothing else in the app changes.
 
 # Legal
 
-Please read this section before using, building, or redistributing NØTE.
+Please read this section before using, building, or redistributing Esei.
 
 ## License
 
-**NØTE is licensed under the GNU General Public License, version 3 or (at your option) any
+**Esei is licensed under the GNU General Public License, version 3 or (at your option) any
 later version (GPL-3.0-or-later).** The full license text is in [`LICENSE`](LICENSE); the
 project copyright notice is in [`COPYRIGHT`](COPYRIGHT).
 
 ```
-NØTE — a music player for Android
-Copyright (C) 2026 Sanyam Jain
+Esei — a music player for Android
+Copyright (C) 2026 Banishwor Athokpam
+Based on NØTE, Copyright (C) 2026 Sanyam Jain
 
 This program is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software Foundation,
@@ -153,31 +147,28 @@ either version 3 of the License, or (at your option) any later version.
 
 ### Why GPL and not a permissive license
 
-NØTE links the **NewPipe Extractor**, which is GPL-3.0-or-later. GPL is a copyleft
-license, so any distributed work that combines with it must be released under the same
-terms. NØTE is therefore GPL-3.0-or-later. This is not optional and not a preference — it
-is the licensing consequence of the dependency.
-
-An earlier revision of this repository carried an MIT `LICENSE` inherited from the Expo
-project template. That text did not describe the combined work and has been replaced.
+Esei, like NØTE before it, links the **NewPipe Extractor**, which is GPL-3.0-or-later. GPL
+is a copyleft license, so any distributed work that combines with it must be released under
+the same terms. Esei is therefore GPL-3.0-or-later. This is not optional and not a
+preference — it is the licensing consequence of the dependency.
 
 ### What the license means for you
 
-You may **use, study, modify, and redistribute** NØTE, including commercially. In exchange,
-if you distribute NØTE or any derivative of it — modified or not, as source or as an APK —
+You may **use, study, modify, and redistribute** Esei, including commercially. In exchange,
+if you distribute Esei or any derivative of it — modified or not, as source or as an APK —
 you must:
 
 1. License the whole work under GPL-3.0-or-later,
 2. Provide or offer the **complete corresponding source code**, including your changes, and
 3. Preserve the copyright notices and this license information.
 
-You may **not** relicense NØTE or any derivative under a permissive or proprietary license,
+You may **not** relicense Esei or any derivative under a permissive or proprietary license,
 and you may not distribute a binary without making the matching source available.
 
 ### Source code availability
 
 This repository **is** the complete corresponding source for the released APK, as required
-by GPL-3.0-or-later §3 and §6. If you received a NØTE binary from anywhere else and cannot
+by GPL-3.0-or-later §3 and §6. If you received an Esei binary from anywhere else and cannot
 obtain its source, that redistribution is not compliant with the license.
 
 ## Warranty disclaimer
@@ -188,7 +179,7 @@ As stated in sections 15 and 16 of the GPL:
 > WARRANTY**; without even the implied warranty of **MERCHANTABILITY** or **FITNESS FOR A
 > PARTICULAR PURPOSE**. See the GNU General Public License for more details.
 
-You use NØTE entirely at your own risk. The author accepts no liability for any damages
+You use Esei entirely at your own risk. The maintainer accepts no liability for any damages
 arising from its use.
 
 ## Third-party components
@@ -208,37 +199,38 @@ The NewPipe **application** is not used or bundled — only the extractor librar
 
 ## No affiliation or endorsement
 
-- NØTE is **not affiliated with, authorised by, endorsed by, or sponsored by Google LLC,
+- Esei is **not affiliated with, authorised by, endorsed by, or sponsored by Google LLC,
   YouTube, or any of their subsidiaries.** "YouTube" and "Google" are trademarks of
   Google LLC. They are referred to here only to describe what the software does
   (nominative use); no claim is made to those marks.
-- NØTE is **not affiliated with Team NewPipe.** NewPipe Extractor is used as an
+- Esei is **not affiliated with Team NewPipe.** NewPipe Extractor is used as an
   independent, unmodified library under its own license, and its authors have no
   involvement in this project.
-- NØTE is an independent project by Sanyam Jain.
+- Esei is a fork maintained by Banishwor Athokpam. The original NØTE project, by
+  Sanyam Jain, is a separate project and its author has no involvement in Esei.
 
 ## No content is hosted or distributed
 
-**NØTE does not host, store, upload, cache for redistribution, or provide any music, audio,
-video, or other copyrighted content.** It contains no media library of its own.
+**Esei does not host, upload, redistribute, or provide any music, audio, video, or other
+copyrighted content.** It contains no media library of its own.
 
-NØTE is a client. It performs the same kind of requests a browser performs, on your device,
-at your direction, and plays the result back to you. All content remains with its original
-host and its rights holders. No content passes through any infrastructure operated by the
-author.
+Esei is a client. It performs the same kind of requests a browser performs, on your device,
+at your direction, and plays the result back to you. When a song is saved, it is stored
+only on your own device, for your own listening. No content passes through any
+infrastructure operated by the maintainer.
 
 ## Your responsibility as a user
 
 Accessing a third-party service through an unofficial client **may conflict with that
 service's terms of service**, and those terms are a matter between you and that service.
 
-By using NØTE you accept that:
+By using Esei you accept that:
 
 - You are solely responsible for how you use it, and for complying with the terms of
   service of any platform you access through it, as well as with the copyright law and any
   other laws that apply where you live.
-- The author does not encourage or condone copyright infringement.
-- NØTE is published as **free software for personal, educational, and interoperability
+- The maintainer does not encourage or condone copyright infringement.
+- Esei is published as **free software for personal, educational, and interoperability
   purposes**, and is provided as-is with no warranty of any kind.
 
 If you are unsure whether your intended use is lawful in your jurisdiction, seek your own
@@ -246,13 +238,13 @@ legal advice. Nothing in this document is legal advice.
 
 ## Privacy
 
-NØTE has no account system, no analytics, no telemetry, no crash reporting, and no server
-operated by the author.
+Esei has no account system, no analytics, no telemetry, no crash reporting, and no server
+operated by the maintainer.
 
-Liked songs, playlists, history, queue, playback position, and settings are written to your
-device's local storage and never leave it. Uninstalling the app removes them. The only
-network requests NØTE makes are those required to fulfil a search or play a track you
-selected.
+Liked songs, playlists, history, queue, playback position, settings, and songs saved by
+the automatic-saving feature are written to your device's local storage and never leave
+it. Uninstalling the app removes them. The only network requests Esei makes are those
+required to fulfil a search or play a track you selected.
 
 ## DMCA and contact
 
@@ -273,7 +265,10 @@ contain provider-specific playback logic.
 
 ## Credits
 
-Built by **[Sanyam Jain](https://github.com/SJbuilds04)** (SJBUILDS).
+Forked and maintained by **[Banishwor Athokpam](https://banishwor.github.io)**.
+
+Original app: **[NØTE](https://github.com/SJbuilds04/NOTE)** by
+**[Sanyam Jain](https://github.com/SJbuilds04)** (SJBUILDS). Esei exists because of his work.
 
 Stream resolution is powered by the excellent
 [NewPipe Extractor](https://github.com/TeamNewPipe/NewPipeExtractor) by Team NewPipe.
