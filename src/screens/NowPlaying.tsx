@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -10,11 +10,12 @@ import {
   ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronDown, Heart, Play, Pause, SkipBack, SkipForward, Repeat, Repeat1, Shuffle, RotateCcw, RotateCw, MonitorSpeaker, Share, ListMusic, ListPlus, X } from 'lucide-react-native';
+import { ChevronDown, Heart, Play, Pause, SkipBack, SkipForward, Repeat, Repeat1, Shuffle, RotateCcw, RotateCw, MonitorSpeaker, Share, ListMusic, ListPlus, X, Moon } from 'lucide-react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { PlaybackSourceSheet } from '../components/player/PlaybackSourceSheet';
+import { SleepTimerSheet } from '../components/player/SleepTimerSheet';
 import { SeekBar } from '../components/player/SeekBar';
 import { AddToPlaylistSheet } from '../components/lists/AddToPlaylistSheet';
 import { Track } from '../core/types';
@@ -57,11 +58,29 @@ export default function NowPlayingScreen() {
     jumpTo,
     removeFromQueue,
     canPlayCurrent,
+    sleepTimer,
   } = usePlayer();
 
   const { isLiked, toggleLike } = useLibrary();
   const [showQueue, setShowQueue] = useState(false);
   const [showSource, setShowSource] = useState(false);
+  const [showSleep, setShowSleep] = useState(false);
+
+  // The sleep countdown label only needs minute granularity; re-render on
+  // a slow tick while a minutes timer is armed.
+  const [, setSleepTick] = useState(0);
+  useEffect(() => {
+    if (sleepTimer.mode !== 'minutes') return;
+    const t = setInterval(() => setSleepTick((v) => v + 1), 15_000);
+    return () => clearInterval(t);
+  }, [sleepTimer]);
+
+  const sleepLabel =
+    sleepTimer.mode === 'minutes'
+      ? `${Math.max(1, Math.ceil((sleepTimer.endsAt - Date.now()) / 60000))}m`
+      : sleepTimer.mode === 'endOfTrack'
+        ? 'End'
+        : null;
   /** Track whose "add to playlist" sheet is open. */
   const [addingTrack, setAddingTrack] = useState<Track | null>(null);
 
@@ -196,6 +215,13 @@ export default function NowPlayingScreen() {
           <TouchableOpacity>
             <Share color={COLORS.text.secondary} size={24} />
           </TouchableOpacity>
+          <TouchableOpacity style={styles.sleepButton} onPress={() => setShowSleep(true)}>
+            <Moon
+              color={sleepTimer.mode !== 'off' ? COLORS.accent.green : COLORS.text.secondary}
+              size={24}
+            />
+            {sleepLabel && <Text style={styles.sleepLabel}>{sleepLabel}</Text>}
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => setShowQueue((v) => !v)}>
             <ListMusic
               color={showQueue ? COLORS.accent.green : COLORS.text.secondary}
@@ -246,6 +272,8 @@ export default function NowPlayingScreen() {
       <AddToPlaylistSheet track={addingTrack} onClose={() => setAddingTrack(null)} />
 
       <PlaybackSourceSheet visible={showSource} onClose={() => setShowSource(false)} />
+
+      <SleepTimerSheet visible={showSleep} onClose={() => setShowSleep(false)} />
     </View>
   );
 }
@@ -361,6 +389,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: SIZES.xl,
     marginBottom: SIZES.xl,
+  },
+  sleepButton: {
+    alignItems: 'center',
+    minWidth: 32,
+  },
+  sleepLabel: {
+    fontFamily: FONTS.medium,
+    fontSize: 9,
+    color: COLORS.accent.green,
+    marginTop: 2,
   },
   lyricsSnippet: {
     borderRadius: SIZES.radius.md,

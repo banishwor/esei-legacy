@@ -307,19 +307,35 @@ export class YouTubeResolver implements TrackResolver {
 
   async getRelated(track: Track, signal?: AbortSignal): Promise<Track[]> {
     try {
-      const response = await innertube.next(track.sourceId, undefined, signal);
-      const items = deepCollect(response, 'playlistPanelVideoRenderer');
+      // A bare `next` for one video returns a watch panel holding ONLY the
+      // track itself, plus an automix preview pointing at the song's radio
+      // playlist (RDAMVM<videoId>). The related queue is served only when
+      // that playlist id is handed back in a second `next` call. Parsing
+      // the first response alone therefore yielded just the seed track,
+      // which the filter below drops -- no related tracks, ever.
+      const first = await innertube.next(track.sourceId, undefined, signal);
+      const direct = this.tracksFromNext(first, track.sourceId);
+      if (direct.length) return direct;
 
-      return dedupeBy(
-        items
-          .map((i: any) => this.parsePanelItem(i))
-          .filter((t): t is Track => t !== null && t.sourceId !== track.sourceId),
-        (t) => t.id
-      );
+      const automixId = findAutomixPlaylistId(first) ?? `RDAMVM${track.sourceId}`;
+      const radio = await innertube.next(track.sourceId, automixId, signal);
+      return this.tracksFromNext(radio, track.sourceId);
     } catch {
       // Related tracks are a nicety -- never surface a failure for them.
       return [];
     }
+  }
+
+  /** Parse a `next` response's watch panel, dropping the seed track. */
+  private tracksFromNext(response: any, seedSourceId: string): Track[] {
+    const items = deepCollect(response, 'playlistPanelVideoRenderer');
+
+    return dedupeBy(
+      items
+        .map((i: any) => this.parsePanelItem(i))
+        .filter((t): t is Track => t !== null && t.sourceId !== seedSourceId),
+      (t) => t.id
+    );
   }
 
   async getSuggestions(input: string, signal?: AbortSignal): Promise<string[]> {
@@ -408,6 +424,23 @@ function parseTimeText(text: string): number {
   const parts = text.trim().split(':').map(Number);
   if (parts.some((n) => !Number.isFinite(n))) return 0;
   return parts.reduce((total, p) => total * 60 + p, 0);
+}
+
+/**
+ * The radio/automix playlist a `next` response offers for a lone track,
+ * carried by the automix preview's navigation endpoint. Both endpoint
+ * shapes occur (watchPlaylistEndpoint on WEB_REMIX, watchEndpoint from
+ * other clients), so check both.
+ */
+function findAutomixPlaylistId(response: any): string | null {
+  for (const preview of deepCollect(response, 'automixPlaylistVideoRenderer')) {
+    const endpoint = preview?.navigationEndpoint ?? {};
+    const id =
+      endpoint?.watchPlaylistEndpoint?.playlistId ??
+      endpoint?.watchEndpoint?.playlistId;
+    if (typeof id === 'string' && id) return id;
+  }
+  return null;
 }
 
 /** Collect every value stored under `key` anywhere in a renderer tree. */

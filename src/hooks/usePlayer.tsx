@@ -20,8 +20,15 @@ import {
   DownloadService,
   DownloadedTrack,
 } from '../services/DownloadService';
+import { ConnectivityService } from '../services/ConnectivityService';
 import { LibraryService } from '../services/LibraryService';
 import { MusicService } from '../services/MusicService';
+
+/** Sleep timer: off, a wall-clock countdown, or "pause when this song ends". */
+export type SleepTimerState =
+  | { mode: 'off' }
+  | { mode: 'minutes'; minutes: number; endsAt: number }
+  | { mode: 'endOfTrack' };
 
 type PlayerContextType = {
   // --- the original mock API, unchanged so existing screens keep working ---
@@ -68,6 +75,10 @@ type PlayerContextType = {
 
   isReady: boolean;
   canPlayCurrent: boolean;
+
+  sleepTimer: SleepTimerState;
+  /** Arm (minutes | 'endOfTrack') or cancel (null) the sleep timer. */
+  setSleepTimer: (option: number | 'endOfTrack' | null) => void;
 };
 
 /**
@@ -82,6 +93,14 @@ const HISTORY_MIN_RATIO = 0.25;
 
 /** How many unplayable tracks in a row we step over before giving up. */
 const MAX_AUTO_SKIPS = 3;
+
+/**
+ * How many recently played tracks the queue continuation treats as
+ * "already heard". Bounded on purpose: with an endless related-tracks
+ * chain, filtering against the whole session would eventually leave
+ * nothing fresh to add.
+ */
+const RECENT_WINDOW = 50;
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
 
@@ -114,6 +133,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [isReady, setIsReady] = useState(false);
   const [queueVersion, setQueueVersion] = useState(0);
   const [volume, setVolumeState] = useState(1);
+  const [sleepTimer, setSleepTimerState] = useState<SleepTimerState>({ mode: 'off' });
 
   /** Cancels an in-flight load when the user starts another one. */
   const loadAbort = useRef<AbortController | null>(null);
@@ -135,6 +155,14 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
    * queue full of dead videos stops instead of racing to the end.
    */
   const autoSkips = useRef(0);
+  /** Serializes queue extensions so top-ups and end-of-queue advances never race. */
+  const extensionChainRef = useRef<Promise<void> | null>(null);
+  /** Ids of tracks loaded this session (newest last), feeding the fresh window. */
+  const playedIdsRef = useRef<string[]>([]);
+  /** Wall-clock sleep timer handle, when a minutes timer is armed. */
+  const sleepTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** "End of current song" sleep: pause at the next natural track end. */
+  const sleepAtTrackEndRef = useRef(false);
   /** Load id whose listen has already been written to history. */
   const historyWrittenFor = useRef<number | null>(null);
 
@@ -147,6 +175,13 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, []);
 
   // ---- loading a track --------------------------------------------------
+
+  /** Remember a loaded track for the continuation's recent window. */
+  const notePlayed = (trackId: string) => {
+    const ids = playedIdsRef.current;
+    ids.push(trackId);
+    if (ids.length > RECENT_WINDOW) ids.splice(0, ids.length - RECENT_WINDOW);
+  };
 
   const loadCurrent = useCallback(
     async (options: { autoPlay?: boolean; startPosition?: number } = {}) => {
@@ -216,9 +251,17 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         loadingTrackId.current = null;
         if (__DEV__) console.log('[playback] started', track.title);
         LibraryService.recordPlay(track);
+        notePlayed(track.id);
 
         // Warm exactly one track ahead, so pressing skip is instant.
         preloader.schedule(queueRef.current.peekNext());
+
+        // Continuous playback: top the queue up BEFORE it runs dry, so a
+        // track ending never has to wait on the network. The extension
+        // applies the settings / offline / connectivity gates itself.
+        if (queueRef.current.repeat === 'off' && queueRef.current.upcoming.length <= 2) {
+          void extendWithRelated('append');
+        }
       } catch (e) {
         if (id !== loadId.current) return;
 
@@ -233,20 +276,39 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           MusicService.invalidateStream(track);
         }
 
-        // A track that simply cannot play should not strand the queue: step
-        // over it and keep going. Network failures are NOT skipped -- the
-        // next track would fail identically, so the error is shown instead.
-        const skippable = err.kind === 'track_unavailable' ||
+        // A track that cannot play must not strand the session: step over
+        // it and keep going -- a dead video, a failed resolve, even a
+        // network blip (the next track may well be a saved local file).
+        // Bounded by MAX_AUTO_SKIPS, so a run of failures still stops
+        // cleanly instead of racing through the whole queue.
+        const skippable =
+          err.kind === 'track_unavailable' ||
           err.kind === 'region_restricted' ||
-          err.kind === 'source_unavailable';
+          err.kind === 'source_unavailable' ||
+          err.kind === 'playback_failed' ||
+          err.kind === 'network' ||
+          err.kind === 'timeout' ||
+          err.kind === 'rate_limited' ||
+          err.kind === 'unknown';
 
-        if (skippable && autoSkips.current < MAX_AUTO_SKIPS && queueRef.current.hasNext) {
+        if (skippable && autoSkips.current < MAX_AUTO_SKIPS) {
           autoSkips.current += 1;
           if (__DEV__) console.log('[playback] auto-skip', autoSkips.current, 'past', track.title);
-          queueRef.current.next(false);
-          bumpQueue();
-          persistQueue();
-          void loadCurrent({ autoPlay: true });
+
+          const nextTrack = queueRef.current.next(false);
+          if (nextTrack) {
+            bumpQueue();
+            persistQueue();
+            void loadCurrent({ autoPlay: true });
+            return;
+          }
+
+          // Nothing queued behind the dead track: give the continuation a
+          // chance to fetch more before the session ends. If it finds
+          // tracks, its load clears this error; if not, playback stops
+          // here with the error left visible.
+          setError(messageFor(err));
+          void extendWithRelated('advance');
           return;
         }
 
@@ -263,14 +325,23 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     playbackEngine.on('onStatus', (s) => setStatus(s));
 
     playbackEngine.on('onComplete', () => {
+      // Sleep timer, "end of current song": pause here instead of
+      // advancing. It also wins over repeat-one -- the song HAS ended.
+      if (sleepAtTrackEndRef.current) {
+        sleepAtTrackEndRef.current = false;
+        setSleepTimerState({ mode: 'off' });
+        playbackEngine.pause();
+        return;
+      }
+
       // `auto` so repeat-one replays rather than advances.
       const nextTrack = queueRef.current.next(true);
       bumpQueue();
       persistQueue();
 
       if (!nextTrack) {
-        // End of queue: optionally keep going with related tracks.
-        void extendWithRelated();
+        // End of queue: keep going with related tracks.
+        void extendWithRelated('advance');
         return;
       }
       void loadCurrent({ autoPlay: true });
@@ -283,34 +354,199 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     return () => {
       preloader.cancel();
+      if (sleepTimeoutRef.current) clearTimeout(sleepTimeoutRef.current);
       void playbackEngine.release();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const extendWithRelated = useCallback(async () => {
-    const settings = LibraryService.getSettings();
-    const last = queueRef.current.current;
+  /**
+   * One queue extension: fetch related tracks and append them, optionally
+   * advancing into them. Runs in two modes:
+   *
+   *   'append'  -- a top-up while playback continues (loadCurrent calls it
+   *                when the upcoming buffer runs low), so the queue never
+   *                runs dry mid-session;
+   *   'advance' -- the queue HAS run out (track ended, manual skip, or a
+   *                dead track with nothing behind it): after appending,
+   *                move into the next track and play it.
+   *
+   * Because an appended batch is itself finite, an 'advance' eventually
+   * happens again for the batch's last track, whose own related tracks
+   * extend the chain further -- playback rolls on until the user stops
+   * it, the setting is off, the device goes offline, or every source
+   * below genuinely fails.
+   */
+  const runExtension = useCallback(
+    async (mode: 'advance' | 'append') => {
+      const settings = LibraryService.getSettings();
+      const last = queueRef.current.current;
 
-    if (!settings.autoplayRelated || !last) return;
+      if (!settings.autoplayRelated || !last) return;
 
-    try {
-      const related = await MusicService.getRelated(last);
-      const fresh = related.filter(
-        (t) => !queueRef.current.items.some((q) => q.id === t.id)
-      );
-      if (!fresh.length) return;
+      // An explicit Offline play is one pinned song by design -- it must
+      // not drift back into streaming (see playOffline). And with no
+      // connection there is nothing to fetch: the queue simply ends,
+      // which is also the right behaviour for offline saved queues.
+      if (queueRef.current.context === 'Offline') return;
+      if (!ConnectivityService.check()) return;
 
-      queueRef.current.add(fresh.slice(0, 20));
-      const nextTrack = queueRef.current.next(false);
-      bumpQueue();
-      persistQueue();
+      // Advance mode may find the job already done -- a top-up that raced
+      // ahead appended tracks while this call waited its turn.
+      if (mode === 'advance') {
+        const waiting = queueRef.current.next(false);
+        if (waiting) {
+          bumpQueue();
+          persistQueue();
+          void loadCurrent({ autoPlay: true });
+          return;
+        }
+      }
 
-      if (nextTrack) void loadCurrent({ autoPlay: true });
-    } catch {
-      // Autoplay is a convenience; silence is the right failure mode.
+      try {
+        const recentWindow = new Set(playedIdsRef.current);
+        const upcomingIds = new Set(queueRef.current.upcoming.map((t) => t.id));
+        const queuedIds = new Set(queueRef.current.items.map((t) => t.id));
+
+        // Every source is judged the same way: anything other than the
+        // track that just ended is a candidate (kept as the last-resort
+        // pool); candidates outside the recent window are "fresh".
+        // Returns true when the source produced fresh tracks.
+        const candidateIds = new Set<string>();
+        let candidates: Track[] = [];
+        let fresh: Track[] = [];
+        const consider = (tracks: Track[]): boolean => {
+          const usable = tracks.filter((t) => t.id !== last.id);
+          for (const t of usable) {
+            if (!candidateIds.has(t.id)) {
+              candidateIds.add(t.id);
+              candidates.push(t);
+            }
+          }
+          fresh = usable.filter((t) => !recentWindow.has(t.id));
+          return fresh.length > 0;
+        };
+
+        // 1. Related tracks for the song that just ended. One retry: the
+        //    radio lookup behind it is two requests and either can blip.
+        let extended = consider(await MusicService.getRelated(last));
+        if (!extended) extended = consider(await MusicService.getRelated(last));
+
+        // 2. Related tracks for whatever played just before it.
+        if (!extended) {
+          const previous = LibraryService.getRecentlyPlayed().find(
+            (t) => t.id !== last.id
+          );
+          if (previous) extended = consider(await MusicService.getRelated(previous));
+        }
+
+        // 3. More songs by the same artist.
+        if (!extended && last.artist.name && last.artist.name !== 'Unknown artist') {
+          try {
+            const results = await MusicService.search(last.artist.name, {
+              filter: 'Songs',
+              limit: 25,
+            });
+            extended = consider(results.tracks);
+          } catch {
+            // Search is the last network resort; failing changes nothing.
+          }
+        }
+
+        // The fetches take seconds. If the user started something else in
+        // the meantime, their choice wins -- never touch their new queue.
+        if (queueRef.current.current?.id !== last.id) return;
+
+        if (!fresh.length && candidates.length) {
+          // Nothing fresh, but a repeat beats silence: candidates played
+          // earlier in this queue are lifted out and re-appended below;
+          // candidates not in the queue at all can simply be added. The
+          // just-ended track is excluded by `consider`, so it can never
+          // immediately replay itself.
+          fresh = candidates.filter((t) => !upcomingIds.has(t.id));
+        }
+        if (!fresh.length) return;
+
+        // A fresh/repeat track still sitting in the queue's played region
+        // must be lifted out before Queue.add will take it again (it
+        // de-duplicates by id). Upcoming tracks are left where they are;
+        // add() skips them and they play in their turn.
+        for (const t of fresh) {
+          if (queuedIds.has(t.id) && !upcomingIds.has(t.id)) {
+            queueRef.current.remove(t.id);
+          }
+        }
+
+        queueRef.current.add(fresh.slice(0, 20));
+        bumpQueue();
+        persistQueue();
+
+        if (mode === 'advance') {
+          const nextTrack = queueRef.current.next(false);
+          if (nextTrack) void loadCurrent({ autoPlay: true });
+        }
+      } catch {
+        // Autoplay is a convenience; silence is the right failure mode,
+        // and nothing in here may ever take the player down with it.
+      }
+    },
+    [bumpQueue, loadCurrent, persistQueue]
+  );
+
+  /**
+   * Serialize extensions through one promise chain: a top-up in flight
+   * when the queue runs out must finish before the advance runs, and the
+   * advance then re-reads fresh queue state instead of racing it.
+   */
+  const extendWithRelated = useCallback(
+    (mode: 'advance' | 'append') => {
+      const run = (extensionChainRef.current ?? Promise.resolve())
+        .then(() => runExtension(mode))
+        .catch(() => {});
+      extensionChainRef.current = run;
+      void run.then(() => {
+        if (extensionChainRef.current === run) extensionChainRef.current = null;
+      });
+      return run;
+    },
+    [runExtension]
+  );
+
+  // ---- sleep timer ------------------------------------------------------
+
+  /** Drop an armed "end of current song" (a fresh explicit queue replaces it). */
+  const disarmSleepAtTrackEnd = () => {
+    if (!sleepAtTrackEndRef.current) return;
+    sleepAtTrackEndRef.current = false;
+    setSleepTimerState((s) => (s.mode === 'endOfTrack' ? { mode: 'off' } : s));
+  };
+
+  const setSleepTimer = useCallback((option: number | 'endOfTrack' | null) => {
+    if (sleepTimeoutRef.current) {
+      clearTimeout(sleepTimeoutRef.current);
+      sleepTimeoutRef.current = null;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    sleepAtTrackEndRef.current = false;
+
+    if (option === null) {
+      setSleepTimerState({ mode: 'off' });
+      return;
+    }
+    if (option === 'endOfTrack') {
+      sleepAtTrackEndRef.current = true;
+      setSleepTimerState({ mode: 'endOfTrack' });
+      return;
+    }
+
+    // Wall-clock on purpose: track changes and queue top-ups must not
+    // reset it, and it keeps running with the screen closed.
+    const endsAt = Date.now() + option * 60_000;
+    sleepTimeoutRef.current = setTimeout(() => {
+      sleepTimeoutRef.current = null;
+      setSleepTimerState({ mode: 'off' });
+      playbackEngine.pause();
+    }, option * 60_000);
+    setSleepTimerState({ mode: 'minutes', minutes: option, endsAt });
   }, []);
 
   // ---- startup: restore library, settings, queue and position -----------
@@ -442,6 +678,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const playTrack = useCallback(
     (track: Track, context?: { tracks?: Track[]; label?: string }) => {
+      disarmSleepAtTrackEnd();
       const list = context?.tracks?.length ? context.tracks : [track];
       const startIndex = Math.max(
         0,
@@ -468,6 +705,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
    */
   const playOffline = useCallback(
     (record: DownloadedTrack) => {
+      disarmSleepAtTrackEnd();
       void (async () => {
         const stream = await DownloadService.getOfflineStream(record);
         if (!stream) {
@@ -512,7 +750,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     persistQueue();
 
     if (!nextTrack) {
-      void extendWithRelated();
+      void extendWithRelated('advance');
       return;
     }
     void loadCurrent({ autoPlay: true });
@@ -716,6 +954,9 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
       isReady,
       canPlayCurrent: currentTrack ? MusicService.canPlay(currentTrack) : false,
+
+      sleepTimer,
+      setSleepTimer,
     }),
     [
       currentTrack,
@@ -745,6 +986,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       toggleShuffle,
       cycleRepeat,
       isReady,
+      sleepTimer,
+      setSleepTimer,
     ]
   );
 
